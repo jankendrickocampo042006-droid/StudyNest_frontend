@@ -1153,7 +1153,6 @@ app.addEventListener('click', async (event) => {
 window.addEventListener('hashchange', () => {
   document.querySelector('.modal-backdrop')?.remove();
   render();
-  loadBackendState();
 });
 
 render();
