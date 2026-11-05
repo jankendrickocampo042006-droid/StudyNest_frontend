@@ -36,6 +36,7 @@ let flashcardSession = null;
 let toastTimer;
 const app = document.querySelector('#app');
 let authRoot = null;
+let initialSessionRequest = null;
 
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>"']/g, (char) => ({
@@ -74,6 +75,9 @@ function canManageContent(role = state.user?.role) {
 
 async function apiCall(path, options = {}) {
   try {
+    if ((options.method || 'GET').toUpperCase() !== 'GET' && initialSessionRequest) {
+      await initialSessionRequest;
+    }
     return await apiRequest(path, options);
   } catch (error) {
     if (error instanceof Error && error.payload?.requires_email_verification) {
@@ -84,6 +88,19 @@ async function apiCall(path, options = {}) {
     }
     notify(error instanceof Error ? error.message : 'StudyNest could not complete that request.');
     return null;
+  }
+}
+
+async function restoreInitialSession() {
+  initialSessionRequest = (async () => {
+    const session = await apiCall('/auth/session');
+    if (!session?.authenticated || route() !== 'login') return;
+    await loadBackendState();
+  })();
+  try {
+    await initialSessionRequest;
+  } finally {
+    initialSessionRequest = null;
   }
 }
 
@@ -178,6 +195,14 @@ async function loadBackendState() {
     go('dashboard');
     return true;
   }
+  render();
+  return true;
+}
+
+async function refreshManagementState() {
+  const content = await apiCall('/manage');
+  if (!content) return false;
+  management = content;
   render();
   return true;
 }
@@ -704,15 +729,16 @@ async function authenticate(values, registering) {
     return;
   }
   save('user', result.user);
-  if (!await loadBackendState()) return;
   go(state.user?.role === 'teacher_pending'
     ? 'teacher-application'
     : canManageContent(state.user?.role) ? 'manage-content' : 'dashboard');
+  render();
   notify(registering
     ? values.get('role') === 'teacher' ? 'Email verified. Your teacher application is awaiting administrator review.' : 'Your StudyNest account is ready.'
     : state.user?.teacher_status === 'rejected'
       ? 'Your teacher application was not approved. You can continue using StudyNest as a student.'
       : 'Welcome back to your learning space.');
+  await loadBackendState();
 }
 
 async function verifyEmail(values) {
@@ -790,7 +816,14 @@ app.addEventListener('submit', async (event) => {
     });
     if (!result) return;
     document.querySelector('.modal-backdrop')?.remove();
-    if (!await loadBackendState()) return;
+    teachers = [...teachers, {
+      id: Number(result.id),
+      name: result.name,
+      email: result.email,
+      teacher_id: result.teacher_id || null,
+      created_at: new Date().toISOString(),
+    }];
+    render();
     notify('Teacher account created successfully.');
     return;
   }
@@ -832,7 +865,7 @@ app.addEventListener('submit', async (event) => {
     });
     if (!result) return;
     document.querySelector('.modal-backdrop')?.remove();
-    if (!await loadBackendState()) return;
+    if (!await refreshManagementState()) return;
     notify(`Content ${id ? 'updated' : 'created'} successfully.`);
     return;
   }
@@ -996,7 +1029,14 @@ app.addEventListener('click', async (event) => {
       body: JSON.stringify({ decision }),
     });
     if (!result) return;
-    if (!await loadBackendState()) return;
+    const applicationId = Number(id);
+    teacherApplications = teacherApplications.filter((application) => Number(application.id) !== applicationId);
+    if (result.decision === 'approve') {
+      teachers = [...teachers, result.account];
+    } else {
+      students = [result.account, ...students];
+    }
+    render();
     notify(decision === 'approve' ? 'Teacher application approved.' : 'Teacher application rejected.');
   } else if (action === 'add-content-question') {
     const container = document.querySelector('#quiz-question-fields');
@@ -1016,7 +1056,7 @@ app.addEventListener('click', async (event) => {
     const endpoint = button.dataset.kind === 'quizzes' ? '/manage/quizzes' : `/manage/${button.dataset.kind}`;
     const result = await apiCall(`${endpoint}/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!result) return;
-    if (!await loadBackendState()) return;
+    if (!await refreshManagementState()) return;
     notify('Content deleted.');
   } else if (action === 'favorite') {
     const lessonId = Number(id);
@@ -1040,10 +1080,26 @@ app.addEventListener('click', async (event) => {
       headers: { 'X-Study-Duration': String(duration) },
     });
     if (!result) return;
-    if (!await loadBackendState()) return;
-    if (!state.reviewedLessons.includes(lessonId)) {
-      save('reviewedLessons', [...state.reviewedLessons, lessonId]);
+    const lesson = lessons.find((item) => item.id === lessonId);
+    if (lesson && !state.reviewedLessons.includes(lessonId)) {
+      state.reviewedLessons = [...state.reviewedLessons, lessonId];
     }
+    const now = new Date();
+    state.studyTimeSeconds += duration;
+    const studyDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayStudy = state.weeklyStudy.find((day) => day.study_date === studyDate);
+    if (todayStudy) todayStudy.duration_seconds = Number(todayStudy.duration_seconds) + duration;
+    else state.weeklyStudy = [...state.weeklyStudy, { study_date: studyDate, duration_seconds: duration }];
+    if (lesson) {
+      state.activities = [{
+        type: 'lesson_reviewed',
+        title: lesson.title,
+        details: lesson.subject,
+        created_at: now.toISOString(),
+        date: now,
+      }, ...state.activities].slice(0, 30);
+    }
+    render();
     notify('Lovely work. Your lesson is marked as reviewed.');
   } else if (action === 'delete-set') {
     if (window.confirm('Delete this study set and all its cards?')) {
@@ -1175,4 +1231,8 @@ window.addEventListener('hashchange', () => {
 });
 
 render();
-if (route() !== 'verify-email') loadBackendState();
+if (['login', 'register', 'verify-email', 'forgot-password', 'reset-password', 'google-auth'].includes(route())) {
+  restoreInitialSession();
+} else {
+  loadBackendState();
+}
