@@ -548,8 +548,8 @@ function managementPage() {
 
   if (section === 'applications' && state.user?.role === 'admin') {
     const body = `<div class="admin-record-list">${teacherApplications.map((application) => `<article class="admin-record-row teacher-application-item" data-admin-search="${escapeHtml(`${application.name} ${application.email}`.toLowerCase())}">
-      <span class="admin-record-icon">${icon('bell')}</span><div class="admin-content-copy"><b>${escapeHtml(application.name)}</b><small>${escapeHtml(application.email)} · Teacher ID photo submitted</small>${application.teacher_id_photo ? `<a class="teacher-photo-link" href="${apiBase}/api/manage/teacher-applications/${application.id}/photo" target="_blank" rel="noopener">Review teacher ID photo ↗</a>` : '<small>Photo unavailable</small>'}</div>
-      <div class="admin-content-actions">${application.teacher_id_photo ? `<button class="quiet-button" data-action="review-teacher" data-id="${application.id}" data-decision="approve">Approve</button>` : ''}<button class="quiet-button danger-text" data-action="review-teacher" data-id="${application.id}" data-decision="reject">Reject</button></div>
+      <span class="admin-record-icon">${icon('bell')}</span><div class="admin-content-copy"><b>${escapeHtml(application.name)}</b><small>${escapeHtml(application.email)} · Teacher ID application</small>${application.teacher_id_photo_available ? `<a class="teacher-photo-link" href="${apiBase}/api/manage/teacher-applications/${application.id}/photo" target="_blank" rel="noopener">Review teacher ID photo ↗</a>` : '<small>Photo unavailable · applicant can upload it again from their application page</small>'}</div>
+      <div class="admin-content-actions">${application.teacher_id_photo_available ? `<button class="quiet-button" data-action="review-teacher" data-id="${application.id}" data-decision="approve">Approve</button>` : ''}<button class="quiet-button danger-text" data-action="review-teacher" data-id="${application.id}" data-decision="reject">Reject</button></div>
     </article>`).join('') || '<div class="admin-empty"><p>You’re all caught up. There are no teacher applications waiting for review.</p></div>'}</div>`;
     return shell(`${heading('PEOPLE & ACCESS', 'Teacher applications', 'Review teacher ID photos and decide who can manage learning content.')}
       <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Applications to review</b><small>${teacherApplications.length} waiting for approval</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search applications" placeholder="Search applications..." /></label></div>${body}</section>`,
@@ -586,7 +586,7 @@ function managementPage() {
 }
 
 function teacherApplicationPage() {
-  return `<main class="auth-screen"><section class="auth-story"><a class="brand brand-light" href="#/teacher-application"><span class="brand-mark">s</span><span><b>StudyNest</b><small>teacher application</small></span></a><div class="story-content"><div class="eyebrow">THANK YOU FOR APPLYING</div><h1>Your teaching space is almost ready.</h1><p>An administrator will review your submitted teacher ID photo. You can sign in again after your application is approved.</p><div class="story-doodle">✳</div></div><div class="story-footer">Your application is securely linked to ${escapeHtml(state.user?.email || 'your account')}.</div></section><section class="auth-form-side"><div class="application-status-card"><span class="application-status-icon">⌛</span><div class="eyebrow">APPLICATION STATUS</div><h2>Pending administrator review</h2><p>Your teacher ID photo has been submitted for verification. Teacher tools will unlock after approval.</p><button class="button button-outline button-full" data-action="logout">Log out</button></div></section></main>`;
+  return `<main class="auth-screen"><section class="auth-story"><a class="brand brand-light" href="#/teacher-application"><span class="brand-mark">s</span><span><b>StudyNest</b><small>teacher application</small></span></a><div class="story-content"><div class="eyebrow">THANK YOU FOR APPLYING</div><h1>Your teaching space is almost ready.</h1><p>An administrator will review your submitted teacher ID photo. You can sign in again after your application is approved.</p><div class="story-doodle">✳</div></div><div class="story-footer">Your application is securely linked to ${escapeHtml(state.user?.email || 'your account')}.</div></section><section class="auth-form-side"><div class="application-status-card"><span class="application-status-icon">⌛</span><div class="eyebrow">APPLICATION STATUS</div><h2>Pending administrator review</h2><p>Your teacher ID photo is stored securely for the administrator to review. If your application was submitted before photo storage was fixed and the image is unavailable, upload it again here.</p><form id="teacher-id-resubmit-form" enctype="multipart/form-data"><label>Replace teacher ID photo<input name="teacher_id_photo" type="file" required accept="image/jpeg,image/png,image/webp" capture="environment" /><span class="form-help">JPEG, PNG, or WebP; maximum 5 MB.</span></label><button type="submit" class="button button-primary button-full">Upload ID photo →</button></form><button class="button button-outline button-full" data-action="logout">Log out</button></div></section></main>`;
 }
 
 function teacherForm() {
@@ -820,6 +820,16 @@ app.addEventListener('submit', async (event) => {
   const form = event.target;
   if (form.id === 'auth-form' || form.id === 'verify-email-form') return;
   if (!form.reportValidity()) return;
+  if (form.id === 'teacher-id-resubmit-form') {
+    const result = await apiCall('/auth/teacher-id-photo', {
+      method: 'POST',
+      body: new FormData(form),
+    });
+    if (!result) return;
+    form.reset();
+    notify(result.message);
+    return;
+  }
   if (form.id === 'teacher-form') {
     const values = formData(form);
     const result = await apiCall('/manage/teachers', {
