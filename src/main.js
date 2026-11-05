@@ -1,7 +1,7 @@
 import './style.css';
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { apiRequest } from './api.js';
+import { apiBase, apiRequest } from './api.js';
 import AuthApp from './AuthApp.jsx';
 
 let subjects = [];
@@ -12,6 +12,7 @@ let topics = [];
 let management = { subjects: [], topics: [], lessons: [], quizzes: [] };
 let teachers = [];
 let teacherApplications = [];
+let students = [];
 
 let state = {
   user: null,
@@ -35,7 +36,6 @@ let flashcardSession = null;
 let toastTimer;
 const app = document.querySelector('#app');
 let authRoot = null;
-const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>"']/g, (char) => ({
@@ -137,16 +137,39 @@ async function loadBackendState() {
     })),
   ].sort((a, b) => b.date - a.date);
   const isAdmin = canManageContent();
-  const currentRoute = route();
+  let currentRoute = route();
   if (state.user?.role === 'teacher_pending' && currentRoute !== 'teacher-application') {
     go('teacher-application');
     return true;
   }
   if (state.user && ['login', 'register', 'google-auth'].includes(currentRoute)) {
-    go(state.user.role === 'teacher_pending' ? 'teacher-application' : isAdmin ? 'manage-content' : 'dashboard');
-    return true;
+    currentRoute = isAdmin ? 'manage-content' : 'dashboard';
+    go(currentRoute);
   }
   const managementRoute = currentRoute === 'manage-content' || currentRoute.startsWith('manage-');
+  if (isAdmin && data.management) {
+    management = data.management;
+    teachers = data.teachers || [];
+    teacherApplications = data.teacherApplications || [];
+    students = data.students || [];
+  } else if (isAdmin && currentRoute !== 'profile') {
+    const [content, teacherList, applications] = await Promise.all([
+      apiCall('/manage'),
+      state.user?.role === 'admin' ? apiCall('/manage/teachers') : Promise.resolve([]),
+      state.user?.role === 'admin' ? apiCall('/manage/teacher-applications') : Promise.resolve([]),
+    ]);
+    if (!content) return false;
+    management = content;
+    if (!Array.isArray(teacherList) || !Array.isArray(applications)) return false;
+    teachers = teacherList;
+    teacherApplications = applications;
+    students = [];
+  } else {
+    management = { subjects: [], topics: [], lessons: [], quizzes: [] };
+    teachers = [];
+    teacherApplications = [];
+    students = [];
+  }
   if (isAdmin && !managementRoute && currentRoute !== 'profile') {
     go('manage-content');
     return true;
@@ -154,19 +177,6 @@ async function loadBackendState() {
   if (!isAdmin && managementRoute) {
     go('dashboard');
     return true;
-  }
-  if (isAdmin && managementRoute) {
-    const content = await apiCall('/manage');
-    if (!content) return false;
-    management = content;
-    teachers = state.user?.role === 'admin' ? await apiCall('/manage/teachers') : [];
-    if (!Array.isArray(teachers)) return false;
-    teacherApplications = state.user?.role === 'admin' ? await apiCall('/manage/teacher-applications') : [];
-    if (!Array.isArray(teacherApplications)) return false;
-  } else {
-    management = { subjects: [], topics: [], lessons: [], quizzes: [] };
-    teachers = [];
-    teacherApplications = [];
   }
   render();
   return true;
@@ -216,7 +226,7 @@ function shell(content, title, active) {
           ${adminNavItem('Lessons', 'manage-lessons', 'book', adminSection, management.lessons.length)}
           ${adminNavItem('Quizzes', 'manage-quizzes', 'quiz', adminSection, management.quizzes.length)}
         </nav>
-        ${adminRole ? `<div class="side-label">PEOPLE & ACCESS</div><nav class="admin-sidebar-nav">${adminNavItem('Teachers', 'manage-teachers', 'settings', adminSection, teachers.length)}${adminNavItem('Applications', 'manage-applications', 'bell', adminSection, teacherApplications.length)}</nav>` : ''}
+        ${adminRole ? `<div class="side-label">PEOPLE & ACCESS</div><nav class="admin-sidebar-nav">${adminNavItem('Teachers', 'manage-teachers', 'settings', adminSection, teachers.length)}${adminNavItem('Students', 'manage-students', 'home', adminSection, students.length)}${adminNavItem('Applications', 'manage-applications', 'bell', adminSection, teacherApplications.length)}</nav>` : ''}
         <div class="side-label">ACCOUNT</div>
         <nav>${navItem('Profile settings', 'profile', 'settings', active)}</nav>
         ` : `
@@ -502,9 +512,18 @@ function managementPage() {
     'Teachers', 'manage-teachers');
   }
 
+  if (section === 'students' && state.user?.role === 'admin') {
+    const body = `<div class="admin-record-list">${students.map((student) => `<article class="admin-record-row" data-admin-search="${escapeHtml(`${student.name} ${student.email}`.toLowerCase())}">
+      <span class="admin-record-icon">${icon('home')}</span><div class="admin-content-copy"><b>${escapeHtml(student.name)}</b><small>${escapeHtml(student.email)}</small></div><span class="role-badge">Student</span><small>${Number(student.is_active) === 1 && student.email_verified_at ? 'Active' : 'Inactive or unverified'} · Joined ${escapeHtml(new Date(student.created_at).toLocaleDateString())}</small>
+    </article>`).join('') || '<div class="admin-empty"><p>No student accounts yet.</p></div>'}</div>`;
+    return shell(`${heading('PEOPLE & ACCESS', 'Students', 'View student accounts registered in StudyNest.')}
+      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Student accounts</b><small>${students.length} ${students.length === 1 ? 'student' : 'students'}</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search students" placeholder="Search students..." /></label></div>${body}</section>`,
+    'Students', 'manage-students');
+  }
+
   if (section === 'applications' && state.user?.role === 'admin') {
     const body = `<div class="admin-record-list">${teacherApplications.map((application) => `<article class="admin-record-row teacher-application-item" data-admin-search="${escapeHtml(`${application.name} ${application.email}`.toLowerCase())}">
-      <span class="admin-record-icon">${icon('bell')}</span><div class="admin-content-copy"><b>${escapeHtml(application.name)}</b><small>${escapeHtml(application.email)} · Teacher ID photo submitted</small>${application.teacher_id_photo ? `<a class="teacher-photo-link" href="${escapeHtml((import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, ''))}/api/manage/teacher-applications/${application.id}/photo" target="_blank" rel="noopener">Review teacher ID photo ↗</a>` : '<small>Photo unavailable</small>'}</div>
+      <span class="admin-record-icon">${icon('bell')}</span><div class="admin-content-copy"><b>${escapeHtml(application.name)}</b><small>${escapeHtml(application.email)} · Teacher ID photo submitted</small>${application.teacher_id_photo ? `<a class="teacher-photo-link" href="${apiBase}/api/manage/teacher-applications/${application.id}/photo" target="_blank" rel="noopener">Review teacher ID photo ↗</a>` : '<small>Photo unavailable</small>'}</div>
       <div class="admin-content-actions">${application.teacher_id_photo ? `<button class="quiet-button" data-action="review-teacher" data-id="${application.id}" data-decision="approve">Approve</button>` : ''}<button class="quiet-button danger-text" data-action="review-teacher" data-id="${application.id}" data-decision="reject">Reject</button></div>
     </article>`).join('') || '<div class="admin-empty"><p>You’re all caught up. There are no teacher applications waiting for review.</p></div>'}</div>`;
     return shell(`${heading('PEOPLE & ACCESS', 'Teacher applications', 'Review teacher ID photos and decide who can manage learning content.')}
