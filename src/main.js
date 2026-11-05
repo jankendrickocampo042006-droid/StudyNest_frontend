@@ -169,6 +169,11 @@ async function loadBackendState() {
     teachers = data.teachers || [];
     teacherApplications = data.teacherApplications || [];
     students = data.students || [];
+    if (state.user?.role === 'admin') {
+      const applications = await apiCall('/manage/teacher-applications');
+      if (!Array.isArray(applications)) return false;
+      teacherApplications = applications;
+    }
   } else if (isAdmin && currentRoute !== 'profile') {
     const [content, teacherList, applications] = await Promise.all([
       apiCall('/manage'),
