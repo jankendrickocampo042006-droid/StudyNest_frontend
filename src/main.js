@@ -1175,4 +1175,4 @@ window.addEventListener('hashchange', () => {
 });
 
 render();
-loadBackendState();
+if (route() !== 'verify-email') loadBackendState();
