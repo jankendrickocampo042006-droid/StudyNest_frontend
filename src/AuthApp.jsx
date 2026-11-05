@@ -1,12 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export default function AuthApp({ route, onAuthenticate, onVerify, onResend, onForgotRequest, onPasswordReset }) {
+const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
+
+function loadGoogleIdentityServices() {
+  return new Promise((resolve, reject) => {
+    if (window.google?.accounts?.id) {
+      resolve();
+      return;
+    }
+
+    let script = document.getElementById('google-identity-services');
+    const isNewScript = !script;
+    if (isNewScript) {
+      script = document.createElement('script');
+      script.id = 'google-identity-services';
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+    }
+
+    script.addEventListener('load', resolve, { once: true });
+    script.addEventListener('error', reject, { once: true });
+    if (isNewScript) document.head.append(script);
+  });
+}
+
+export default function AuthApp({ route, onAuthenticate, onGoogleAuthenticate, onVerify, onResend, onForgotRequest, onPasswordReset }) {
   const [role, setRole] = useState('student');
   const [photoUrl, setPhotoUrl] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [googleError, setGoogleError] = useState('');
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const googleButton = useRef(null);
+  const googleAuthHandler = useRef(onGoogleAuthenticate);
   const email = sessionStorage.getItem('studynest_pending_email') || '';
   const resetEmail = sessionStorage.getItem('studynest_password_reset_email') || '';
   const registering = route === 'register';
+  googleAuthHandler.current = onGoogleAuthenticate;
 
   useEffect(() => {
     return () => {
@@ -17,6 +47,51 @@ export default function AuthApp({ route, onAuthenticate, onVerify, onResend, onF
   useEffect(() => {
     setRole('student');
     setPhotoUrl('');
+  }, [route]);
+
+  useEffect(() => {
+    if (!['login', 'register', 'google-auth'].includes(route)) return undefined;
+    let cancelled = false;
+    setGoogleError('');
+
+    if (!googleClientId) {
+      setGoogleError('Add VITE_GOOGLE_CLIENT_ID to frontend/.env and GOOGLE_CLIENT_ID to the backend .env to enable Google sign-in.');
+      return undefined;
+    }
+
+    loadGoogleIdentityServices()
+      .then(() => {
+        if (cancelled || !googleButton.current) return;
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: ({ credential }) => {
+            if (!credential) {
+              setGoogleError('Google did not return a sign-in credential. Please try again.');
+              return;
+            }
+            setGoogleBusy(true);
+            Promise.resolve(googleAuthHandler.current(credential))
+              .catch(() => setGoogleError('Google sign-in did not complete. Please try again.'))
+              .finally(() => setGoogleBusy(false));
+          },
+          auto_select: false,
+        });
+        window.google.accounts.id.renderButton(googleButton.current, {
+          theme: 'outline',
+          size: 'large',
+          text: 'continue_with',
+          shape: 'rectangular',
+          width: Math.min(365, googleButton.current.clientWidth || 365),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleError('Could not load Google sign-in. Check your internet connection and try again.');
+      });
+
+    return () => {
+      cancelled = true;
+      googleButton.current?.replaceChildren();
+    };
   }, [route]);
 
   function handlePhotoChange(event) {
@@ -152,8 +227,10 @@ export default function AuthApp({ route, onAuthenticate, onVerify, onResend, onF
           <div className="auth-switch">{registering ? 'Already have an account?' : 'New to StudyNest?'} <a href={`#/${registering ? 'login' : 'register'}`}>{registering ? 'Sign in' : 'Create an account'}</a></div>
           <a className="forgot-link" href="#/forgot-password">Forgot your password?</a>
           <div className="auth-divider"><span>or</span></div>
-          <a href="#/google-auth" className="button button-google button-full">Continue with Google <span>↗</span></a>
-          <small className="google-note">Google sign-in will be available soon.</small>
+          <div className="google-signin-button" ref={googleButton}></div>
+          {googleBusy && <small className="google-note" role="status">Signing in with Google…</small>}
+          <small className="google-note">New Google accounts start as students; existing account roles are kept.</small>
+          {googleError && <small className="google-note google-error" role="alert">{googleError}</small>}
         </form>
       </section>
     </main>

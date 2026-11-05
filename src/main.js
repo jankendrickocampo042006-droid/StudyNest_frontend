@@ -645,6 +645,7 @@ function render() {
     authRoot.render(createElement(AuthApp, {
       route: current,
       onAuthenticate: authenticate,
+      onGoogleAuthenticate: authenticateWithGoogle,
       onVerify: verifyEmail,
       onResend: resendOtp,
       onForgotRequest: requestPasswordReset,
@@ -738,6 +739,21 @@ async function authenticate(values, registering) {
     : state.user?.teacher_status === 'rejected'
       ? 'Your teacher application was not approved. You can continue using StudyNest as a student.'
       : 'Welcome back to your learning space.');
+  await loadBackendState();
+}
+
+async function authenticateWithGoogle(credential) {
+  const result = await apiCall('/auth/google', {
+    method: 'POST',
+    body: JSON.stringify({ credential }),
+  });
+  if (!result) return;
+  save('user', result.user);
+  go(state.user?.role === 'teacher_pending'
+    ? 'teacher-application'
+    : canManageContent(state.user?.role) ? 'manage-content' : 'dashboard');
+  render();
+  notify('Welcome to your StudyNest learning space.');
   await loadBackendState();
 }
 

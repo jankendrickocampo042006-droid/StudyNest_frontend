@@ -410,9 +410,9 @@ td b { color: #536158; font-weight: 600; }
 .forgot-link { display: block; margin-top: 16px; text-align: center; font-size: 9px; }
 .auth-divider { display: flex; align-items: center; gap: 10px; margin: 19px 0 12px; color: #a3ada6; font-size: 9px; }
 .auth-divider::before, .auth-divider::after { height: 1px; flex: 1; background: #edf0ed; content: ""; }
-.button-google { justify-content: space-between; border-color: #e5eae5; background: #fff; color: #5e6b63; }
-.button-google:hover { background: #fafcf9; }
+.google-signin-button { display: flex; justify-content: center; min-height: 40px; }
 .google-note { display: block; margin-top: 9px; color: #a6afa9; text-align: center; font-size: 8px; }
+.google-error { color: #a24242; line-height: 1.5; }
 
 @media (min-width: 1600px) { .page-content { padding-top: 42px; } }
 @media (max-width: 1180px) {
