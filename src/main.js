@@ -13,6 +13,7 @@ let management = { subjects: [], topics: [], lessons: [], quizzes: [] };
 let teachers = [];
 let teacherApplications = [];
 let students = [];
+let privateLibrary = [];
 
 let state = {
   user: null,
@@ -128,6 +129,7 @@ async function loadBackendState() {
   }));
   state.user = data.user;
   state.sets = data.sets.map((set) => ({ ...set, id: String(set.id), cards: set.cards || [] }));
+  privateLibrary = data.user ? await apiCall('/my-library') || [] : [];
   state.schedules = data.schedules.map((item) => ({ ...item, id: String(item.id), time: item.time.slice(0, 5) }));
   state.favorites = data.favorites;
   state.reviewedLessons = data.reviewedLessons;
@@ -273,6 +275,7 @@ function shell(content, title, active) {
           ${navItem('Subjects', 'subjects', 'book', active)}
           ${navItem('Lessons', 'lessons', 'book', active)}
           ${navItem('My study sets', 'flashcards', 'cards', active)}
+          ${navItem('My Private Library', 'my-library', 'book', active)}
           ${navItem('Practice quizzes', 'quizzes', 'quiz', active)}
         </nav>
         <div class="side-label">MORE</div>
@@ -422,6 +425,46 @@ function flashcardsPage() {
   return shell(`${heading('KEEP THE GOOD STUFF CLOSE', 'My study sets', 'Create a set, add a few cards, and learn at your pace.', '<a href="#/flashcards/create" class="button button-primary">＋ Create a study set</a>')}<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="set-search" type="search" value="${escapeHtml(search)}" placeholder="Search your sets..." /></label><select id="set-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${s.name}</option>`).join('')}</select><select id="set-sort"><option value="newest">Recently created</option><option value="az">Title: A to Z</option><option value="cards">Most cards</option></select></div><div class="studyset-grid" id="studyset-grid">${state.sets.map(setCard).join('')}</div>`, 'My study sets', 'flashcards');
 }
 
+function privateLibraryPage() {
+  const subjectsMarkup = privateLibrary.map((subject) => `<section class="panel private-subject-card">
+    <div class="section-title"><div><div class="eyebrow">YOUR PRIVATE SUBJECT</div><h2>${escapeHtml(subject.name)}</h2><p>${escapeHtml(subject.description || '')}</p></div>
+    <div class="admin-content-actions"><button class="quiet-button" data-action="private-add-topic" data-id="${subject.id}">＋ Add topic</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="subjects" data-id="${subject.id}" data-title="${escapeHtml(subject.name)}">Delete</button></div></div>
+    ${(subject.topics || []).map((topic) => `<article class="private-topic-card"><div class="section-title"><div><span class="eyebrow">TOPIC</span><h3>${escapeHtml(topic.title)}</h3></div><div class="admin-content-actions"><button class="quiet-button" data-action="private-add-lesson" data-id="${topic.id}">＋ Lesson</button><button class="quiet-button" data-action="private-add-quiz" data-id="${topic.id}">＋ Quiz</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="topics" data-id="${topic.id}" data-title="${escapeHtml(topic.title)}">Delete</button></div></div>
+      <div class="private-content-list">
+        ${(topic.lessons || []).map((lesson) => `<div class="private-content-row"><div><b>${escapeHtml(lesson.title)}</b><p class="private-lesson-notes">${escapeHtml(lesson.content || '')}</p>${lesson.pdf_original_name ? `<a class="text-link" href="${apiBase}/api/my-library/lessons/${encodeURIComponent(lesson.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(lesson.pdf_original_name)} ↗</a>` : ''}</div><button class="quiet-button danger-text" data-action="private-delete" data-kind="lessons" data-id="${lesson.id}" data-title="${escapeHtml(lesson.title)}">Delete</button></div>`).join('')}
+        ${(topic.quizzes || []).map((quiz) => `<div class="private-content-row"><div><b>${escapeHtml(quiz.title)}</b><p>${quiz.questions} questions · ${quiz.time} minutes</p></div><div class="admin-content-actions"><button class="button button-outline button-small" data-action="start-quiz" data-id="private-${quiz.id}">Start quiz →</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="quizzes" data-id="${quiz.id}" data-title="${escapeHtml(quiz.title)}">Delete</button></div></div>`).join('')}
+        ${!(topic.lessons || []).length && !(topic.quizzes || []).length ? '<p class="empty-state">No lessons or quizzes yet. Add something to start studying.</p>' : ''}
+      </div>
+    </article>`).join('') || '<p class="empty-state">No topics yet.</p>'}
+  </section>`).join('');
+  return shell(`${heading('YOUR OWN STUDY SPACE', 'My Private Library', 'Create personal subjects, lesson notes, PDF materials, and practice quizzes. Only you can access this library.', '<button class="button button-primary" data-action="private-add-subject">＋ Create subject</button>')}
+    <div class="private-library-actions"><a class="button button-outline" href="#/flashcards">My flashcards →</a></div>
+    ${subjectsMarkup || '<section class="panel empty-panel"><span>✳</span><h2>Your private library starts here</h2><p>Create a subject to organize your own notes, PDFs, and quizzes. Nothing you add here is shared to the teacher catalog.</p><button class="button button-primary" data-action="private-add-subject">Create your first subject →</button></section>'}`,
+  'My Private Library', 'my-library');
+}
+
+function privateLibraryForm(kind, id = '') {
+  const subject = privateLibrary.find((item) => String(item.id) === String(id));
+  const topic = privateLibrary.flatMap((item) => item.topics || []).find((item) => String(item.id) === String(id));
+  const title = kind === 'subjects' ? 'Create a private subject'
+    : kind === 'topics' ? 'Add a topic'
+      : kind === 'lessons' ? 'Create a private lesson' : 'Create a practice quiz';
+  let fields = '';
+  if (kind === 'subjects') {
+    fields = '<label>Subject name<input name="name" required maxlength="150" /></label><label>Description<textarea name="description" rows="3"></textarea></label>';
+  } else if (kind === 'topics') {
+    fields = `<input type="hidden" name="subject_id" value="${escapeHtml(subject?.id || '')}" /><label>Topic name<input name="title" required maxlength="180" /></label>`;
+  } else if (kind === 'lessons') {
+    fields = `<input type="hidden" name="topic_id" value="${escapeHtml(topic?.id || '')}" /><label>Lesson title<input name="title" required maxlength="180" /></label><label>Lesson notes<textarea name="content" required rows="7"></textarea></label><label>Attach PDF (optional)<input name="private_pdf" type="file" accept="application/pdf,.pdf" /><span class="form-help">PDF only, maximum 20 MB. It is stored privately with your lesson.</span></label>`;
+  } else {
+    fields = `<input type="hidden" name="topic_id" value="${escapeHtml(topic?.id || '')}" /><label>Quiz title<input name="title" required maxlength="180" /></label><label>Time limit (minutes)<input name="duration_minutes" type="number" min="1" max="180" value="15" required /></label><div id="quiz-question-fields">${questionFields({}, 0)}</div><button type="button" class="button button-outline button-small" data-action="add-content-question">＋ Add question</button>`;
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-backdrop';
+  overlay.innerHTML = `<form class="modal panel" id="private-library-form" data-kind="${kind}"><button type="button" class="modal-close" data-action="close-modal" aria-label="Close">×</button><div class="eyebrow">ONLY YOU CAN SEE THIS CONTENT</div><h2>${title}</h2>${fields}<div class="form-actions"><button type="button" class="button button-outline" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Save to my library →</button></div></form>`;
+  app.append(overlay);
+}
+
 function setCard(set) {
   const created = set.created_at ? new Date(set.created_at).toLocaleDateString() : '';
   const pdfLink = set.pdf_original_name ? `<a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" class="text-link" target="_blank" rel="noopener">Open attached PDF ↗</a>` : '';
@@ -435,7 +478,7 @@ function flashcardForm(id) {
   const existingTopic = topics.find((topic) => Number(topic.id) === Number(set?.topic_id))
     || topics.find((topic) => topic.title === set?.topic && topic.subject === set?.subject);
   const topicValue = isCustomTopic ? 'custom' : existingTopic ? String(existingTopic.id) : '';
-  return shell(`${heading(set ? 'MAKE IT YOUR OWN' : 'A FEW IDEAS TO REMEMBER', set ? 'Edit study set' : 'Create a study set', 'A good set starts with one question you want to remember.') }<form class="panel form-panel" id="set-form" data-id="${escapeHtml(id || '')}" data-has-pdf="${set?.pdf_original_name ? 'true' : ''}"><div class="form-grid"><label>Study set title<input name="title" required maxlength="120" value="${escapeHtml(set?.title || '')}" placeholder="e.g. Networking essentials" /></label><label>Subject<select name="subject"><option value="">Choose a subject</option>${subjects.map((s) => `<option value="${escapeHtml(s.name)}" ${set?.subject === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label><label class="full-field">Description<textarea name="description" rows="3" placeholder="What will you be learning?">${escapeHtml(set?.description || '')}</textarea></label><label>Topic<select name="topic_id" id="set-topic"><option value="">Choose a topic</option>${topics.map((topic) => `<option value="${topic.id}" ${String(topic.id) === topicValue ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}<option value="custom" ${topicValue === 'custom' ? 'selected' : ''}>Choose my own (upload a PDF)</option></select></label><div class="full-field" id="custom-topic-fields" ${topicValue === 'custom' ? '' : 'hidden'}><label>My topic<input name="custom_topic" maxlength="180" value="${escapeHtml(set?.custom_topic || '')}" placeholder="e.g. My biology reviewer" /></label><label>Choose a PDF ${set?.pdf_original_name ? '<span class="optional">(optional, max 20 MB)</span>' : '<span class="optional">(required, max 20 MB)</span>'}<input name="study_pdf" type="file" accept="application/pdf,.pdf" ${!set?.pdf_original_name && topicValue === 'custom' ? 'required' : ''} /><small class="form-help">Select a PDF from your device. It will be saved with your study set and available on your other devices.</small></label>${set?.pdf_original_name ? `<p class="form-help">Current PDF: <a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(set.pdf_original_name)} ↗</a></p><label class="check-row"><input type="checkbox" name="remove_study_pdf" value="1" /> Remove current PDF</label>` : ''}</div></div><div class="form-section-title"><div><h2>Your flashcards</h2><p>Add a term on one side and its answer on the other.</p></div><button type="button" class="button button-outline button-small" data-action="add-card">＋ Add a card</button></div><div id="card-fields">${cards.map((card, index) => flashcardFields(card, index)).join('')}</div><div class="form-actions"><a href="#/flashcards" class="button button-outline">Cancel</a><button class="button button-primary" type="submit">${set ? 'Save changes' : 'Create study set'} <span>→</span></button></div></form>`, set ? 'Edit study set' : 'Create study set', 'flashcards');
+  return shell(`${heading(set ? 'MAKE IT YOUR OWN' : 'A FEW IDEAS TO REMEMBER', set ? 'Edit study set' : 'Create a study set', 'A good set starts with one question you want to remember.') }<form class="panel form-panel" id="set-form" data-id="${escapeHtml(id || '')}" data-has-pdf="${set?.pdf_original_name ? 'true' : ''}"><div class="form-grid"><label>Study set title<input name="title" required maxlength="120" value="${escapeHtml(set?.title || '')}" placeholder="e.g. Networking essentials" /></label><div id="set-subject-field" ${isCustomTopic ? 'hidden' : ''}><label>Subject<select name="subject"><option value="">Choose a subject</option>${subjects.map((s) => `<option value="${escapeHtml(s.name)}" ${!isCustomTopic && set?.subject === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label></div><label class="full-field">Description<textarea name="description" rows="3" placeholder="What will you be learning?">${escapeHtml(set?.description || '')}</textarea></label><label>Topic<select name="topic_id" id="set-topic"><option value="">Choose a topic</option>${topics.map((topic) => `<option value="${topic.id}" ${String(topic.id) === topicValue ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}<option value="custom" ${topicValue === 'custom' ? 'selected' : ''}>Choose my own (upload a PDF)</option></select></label><div class="full-field" id="custom-topic-fields" ${topicValue === 'custom' ? '' : 'hidden'}><label>My topic<input name="custom_topic" maxlength="180" value="${escapeHtml(set?.custom_topic || '')}" placeholder="e.g. My biology reviewer" /></label><label>Choose a PDF ${set?.pdf_original_name ? '<span class="optional">(optional, max 20 MB)</span>' : '<span class="optional">(required, max 20 MB)</span>'}<input name="study_pdf" type="file" accept="application/pdf,.pdf" ${!set?.pdf_original_name && topicValue === 'custom' ? 'required' : ''} /><small class="form-help">Select a PDF from your device. It will be saved with your study set and available on your other devices.</small></label>${set?.pdf_original_name ? `<p class="form-help">Current PDF: <a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(set.pdf_original_name)} ↗</a></p><label class="check-row"><input type="checkbox" name="remove_study_pdf" value="1" /> Remove current PDF</label>` : ''}</div></div><div class="form-section-title"><div><h2>Your flashcards</h2><p>Add a term on one side and its answer on the other.</p></div><button type="button" class="button button-outline button-small" data-action="add-card">＋ Add a card</button></div><div id="card-fields">${cards.map((card, index) => flashcardFields(card, index)).join('')}</div><div class="form-actions"><a href="#/flashcards" class="button button-outline">Cancel</a><button class="button button-primary" type="submit">${set ? 'Save changes' : 'Create study set'} <span>→</span></button></div></form>`, set ? 'Edit study set' : 'Create study set', 'flashcards');
 }
 
 function flashcardFields(card, index) {
@@ -699,6 +742,7 @@ function render() {
   else if (current === 'lessons') app.innerHTML = lessonsPage();
   else if (current.startsWith('lesson/')) app.innerHTML = lessonDetail(current.split('/')[1]);
   else if (current === 'flashcards') app.innerHTML = flashcardsPage();
+  else if (current === 'my-library') app.innerHTML = privateLibraryPage();
   else if (current === 'flashcards/create') app.innerHTML = flashcardForm('');
   else if (current.startsWith('flashcards/edit/')) app.innerHTML = flashcardForm(decodeURIComponent(current.split('/')[2]));
   else if (current.startsWith('study/')) app.innerHTML = studyPage(decodeURIComponent(current.split('/')[1]));
@@ -906,6 +950,36 @@ app.addEventListener('submit', async (event) => {
     notify(`Content ${id ? 'updated' : 'created'} successfully.`);
     return;
   }
+  if (form.id === 'private-library-form') {
+    const kind = form.dataset.kind;
+    let payload = formData(form);
+    let requestBody = JSON.stringify(payload);
+    if (kind === 'lessons') {
+      requestBody = new FormData(form);
+    } else if (kind === 'quizzes') {
+      payload.questions = [...form.querySelectorAll('.quiz-question-editor')].map((row) => {
+        const question = Object.fromEntries([...row.querySelectorAll('[name]')].map((field) => [field.name, field.value]));
+        question.correct_option = question.type === 'identification' ? question.correct_option_text : question.correct_option;
+        delete question.correct_option_text;
+        return { ...question, option_c: question.option_c || null, option_d: question.option_d || null };
+      });
+      if (!payload.questions.length) {
+        notify('Add at least one quiz question.');
+        return;
+      }
+      payload.duration_minutes = Number(payload.duration_minutes);
+      requestBody = JSON.stringify(payload);
+    }
+    const result = await apiCall(`/my-library/${kind}`, { method: 'POST', body: requestBody });
+    if (!result) return;
+    document.querySelector('.modal-backdrop')?.remove();
+    const library = await apiCall('/my-library');
+    if (!Array.isArray(library)) return;
+    privateLibrary = library;
+    render();
+    notify('Saved to your private library.');
+    return;
+  }
   if (form.id === 'set-form') {
     const terms = [...form.querySelectorAll('textarea[name="term"]')];
     const answers = [...form.querySelectorAll('textarea[name="answer"]')];
@@ -988,8 +1062,15 @@ app.addEventListener('change', (event) => {
   if (['lesson-subject', 'set-subject', 'set-sort', 'quiz-subject'].includes(event.target.id)) filterCards();
   if (event.target.id === 'set-subject') updateStudySetTopics(event.target.value);
   if (event.target.id === 'set-topic') {
-    const customTopicFields = document.querySelector('#custom-topic-fields');
+    const subjectField = document.querySelector('#set-subject-field');
+    const subjectSelect = document.querySelector('#set-form [name="subject"]');
     const isCustom = event.target.value === 'custom';
+    if (subjectField) subjectField.hidden = isCustom;
+    if (isCustom && subjectSelect) {
+      subjectSelect.value = '';
+      updateStudySetTopics('', false);
+    }
+    const customTopicFields = document.querySelector('#custom-topic-fields');
     if (customTopicFields) customTopicFields.hidden = !isCustom;
     const pdfInput = customTopicFields?.querySelector('[name="study_pdf"]');
     if (pdfInput) pdfInput.required = isCustom && !document.querySelector('#set-form')?.dataset.hasPdf;
@@ -1039,7 +1120,7 @@ function filterCards() {
   });
 }
 
-function updateStudySetTopics(subjectName) {
+function updateStudySetTopics(subjectName, dispatchTopicChange = true) {
   const select = document.querySelector('#set-topic');
   if (!select) return;
   const selected = select.value;
@@ -1048,7 +1129,7 @@ function updateStudySetTopics(subjectName) {
   if (selected === 'custom' || availableTopics.some((topic) => String(topic.id) === selected)) {
     select.value = selected;
   }
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+  if (dispatchTopicChange) select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 app.addEventListener('click', async (event) => {
@@ -1074,6 +1155,23 @@ app.addEventListener('click', async (event) => {
     document.querySelector('#sidebar')?.classList.toggle('open');
   } else if (action === 'new-content' || action === 'edit-content') {
     contentForm(button.dataset.kind, action === 'edit-content' ? id : '');
+  } else if (action === 'private-add-subject') {
+    privateLibraryForm('subjects');
+  } else if (action === 'private-add-topic') {
+    privateLibraryForm('topics', id);
+  } else if (action === 'private-add-lesson') {
+    privateLibraryForm('lessons', id);
+  } else if (action === 'private-add-quiz') {
+    privateLibraryForm('quizzes', id);
+  } else if (action === 'private-delete') {
+    if (!window.confirm(`Delete "${button.dataset.title}" and its contents? This cannot be undone.`)) return;
+    const result = await apiCall(`/my-library/${button.dataset.kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!result) return;
+    const library = await apiCall('/my-library');
+    if (!Array.isArray(library)) return;
+    privateLibrary = library;
+    render();
+    notify('Private library item deleted.');
   } else if (action === 'new-teacher') {
     teacherForm();
   } else if (action === 'review-teacher') {
@@ -1214,14 +1312,16 @@ app.addEventListener('click', async (event) => {
   } else if (action === 'close-modal') document.querySelector('.modal-backdrop')?.remove();
   else if (action === 'dismiss') button.closest('.notification-card').remove();
   else if (action === 'start-quiz') {
-    const quiz = await apiCall(`/quizzes/${encodeURIComponent(id)}`);
+    const isPrivate = String(id).startsWith('private-');
+    const quizId = isPrivate ? String(id).slice('private-'.length) : id;
+    const quiz = await apiCall(`${isPrivate ? '/my-library/quizzes' : '/quizzes'}/${encodeURIComponent(quizId)}`);
     if (!quiz) return;
     if (!quiz.questions.length) {
       notify('This quiz does not have any questions yet.');
       return;
     }
     quizQuestions = quiz.questions;
-    quizSession = { quizId: id, index: 0, answers: {}, startedAt: Date.now() };
+    quizSession = { quizId, isPrivate, title: quiz.title, subject: quiz.subject, index: 0, answers: {}, startedAt: Date.now() };
     go('active-quiz');
   } else if (action === 'answer') {
     if (quizSession) quizSession.answers[quizSession.index] = Number(button.dataset.index);
@@ -1236,8 +1336,9 @@ app.addEventListener('click', async (event) => {
     if (quizSession) quizSession.index = Number(button.dataset.index);
     render();
   } else if (action === 'exit-quiz') {
+    const returnRoute = quizSession?.isPrivate ? 'my-library' : 'quizzes';
     quizSession = null;
-    go('quizzes');
+    go(returnRoute);
   } else if (action === 'submit-quiz') {
     const answers = {};
     quizQuestions.forEach((question, index) => {
@@ -1249,7 +1350,7 @@ app.addEventListener('click', async (event) => {
           ? question.options[selected]
           : String.fromCharCode(65 + selected);
     });
-    const result = await apiCall(`/quizzes/${encodeURIComponent(quizSession.quizId)}/attempts`, {
+    const result = await apiCall(`${quizSession.isPrivate ? '/my-library/quizzes' : '/quizzes'}/${encodeURIComponent(quizSession.quizId)}/attempts`, {
       method: 'POST',
       body: JSON.stringify({
         answers,
@@ -1261,8 +1362,8 @@ app.addEventListener('click', async (event) => {
     const quiz = quizzes.find((item) => Number(item.id) === Number(quizSession.quizId));
     state.quizResult = {
       ...result,
-      title: quiz?.title || '',
-      subject: quiz?.subject || '',
+      title: quizSession.title || quiz?.title || '',
+      subject: quizSession.subject || quiz?.subject || '',
       review: result.review.map((item) => ({
         ...item,
         selected: item.type === 'identification'

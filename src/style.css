@@ -209,6 +209,7 @@ form input:not([type="checkbox"]), form textarea, form select { width: 100%; min
 form input::placeholder, form textarea::placeholder { color: #b0b9b3; }
 .full-field { grid-column: 1 / -1; }
 #custom-topic-fields[hidden] { display: none !important; }
+.form-grid > [hidden] { display: none !important; }
 .form-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 25px 0 12px; padding-top: 20px; border-top: 1px solid #edf0ed; }
 .form-section-title h2 { margin: 0 0 4px; font-size: 15px; }
 .form-section-title p { margin: 0; color: #99a39c; font-size: 9px; }
@@ -600,4 +601,24 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .lesson-resource { align-items: flex-start; flex-wrap: wrap; }
   .resource-copy { flex-basis: calc(100% - 58px); }
   .resource-actions { width: 100%; margin-left: 55px; }
+}
+.private-library-actions { display: flex; justify-content: flex-end; margin: -12px 0 16px; }
+.private-subject-card { margin-bottom: 16px; padding: 22px; }
+.private-subject-card > .section-title { align-items: flex-start; }
+.private-subject-card > .section-title p { margin: 5px 0 0; color: #78847b; font-size: 11px; }
+.private-topic-card { margin-top: 16px; padding: 17px; border: 1px solid #e8eee8; border-radius: 12px; background: #fbfcfa; }
+.private-topic-card .section-title { align-items: center; }
+.private-topic-card h3 { margin: 4px 0 0; font-size: 14px; }
+.private-content-list { display: grid; gap: 8px; }
+.private-content-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px; border-radius: 9px; background: #fff; }
+.private-content-row p { margin: 5px 0; color: #78847b; font-size: 10px; line-height: 1.6; }
+.private-content-row .private-lesson-notes { white-space: pre-wrap; }
+.private-content-row .text-link { font-size: 10px; }
+.private-content-row .admin-content-actions { align-items: center; }
+.private-library-form .quiz-question-editor { margin: 12px 0; }
+@media (max-width: 700px) {
+  .private-subject-card { padding: 15px; }
+  .private-subject-card > .section-title, .private-topic-card .section-title { align-items: flex-start; flex-direction: column; }
+  .private-topic-card { padding: 12px; }
+  .private-content-row { flex-direction: column; }
 }
