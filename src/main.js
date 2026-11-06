@@ -461,7 +461,7 @@ function privateLibraryForm(kind, id = '') {
   }
   const overlay = document.createElement('div');
   overlay.className = 'modal-backdrop';
-  overlay.innerHTML = `<form class="modal panel" id="private-library-form" data-kind="${kind}"><button type="button" class="modal-close" data-action="close-modal" aria-label="Close">×</button><div class="eyebrow">ONLY YOU CAN SEE THIS CONTENT</div><h2>${title}</h2>${fields}<div class="form-actions"><button type="button" class="button button-outline" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Save to my library →</button></div></form>`;
+  overlay.innerHTML = `<form class="modal panel content-modal private-library-modal ${kind === 'quizzes' ? 'private-library-quiz-modal' : ''}" id="private-library-form" data-kind="${kind}"><button type="button" class="modal-close" data-action="close-modal" aria-label="Close">×</button><div class="eyebrow">ONLY YOU CAN SEE THIS CONTENT</div><h2>${title}</h2>${fields}<div class="form-actions"><button type="button" class="button button-outline" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Save to my library →</button></div></form>`;
   app.append(overlay);
 }
 
@@ -1196,7 +1196,9 @@ app.addEventListener('click', async (event) => {
     notify(decision === 'approve' ? 'Teacher application approved.' : 'Teacher application rejected.');
   } else if (action === 'add-content-question') {
     const container = document.querySelector('#quiz-question-fields');
+    if (!container) return;
     container.insertAdjacentHTML('beforeend', questionFields({}, container.children.length));
+    container.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } else if (action === 'remove-content-question') {
     const rows = document.querySelectorAll('.quiz-question-editor');
     if (rows.length <= 1) notify('A quiz needs at least one question.');

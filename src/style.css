@@ -362,6 +362,12 @@ td b { color: #536158; font-weight: 600; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: #22352c70; }
 .modal { position: relative; width: min(100%, 475px); padding: 25px; box-shadow: 0 20px 60px #1c312333; }
 .content-modal { width: min(100%, 760px); max-height: calc(100vh - 40px); overflow-y: auto; }
+.private-library-modal { max-height: calc(100vh - 40px); overscroll-behavior: contain; }
+.private-library-quiz-modal { width: min(100%, 760px); }
+@supports (height: 100dvh) {
+  .private-library-modal { max-height: calc(100dvh - 40px); }
+  .content-modal { max-height: calc(100dvh - 40px); }
+}
 .quiz-question-editor { margin: 14px 0; padding: 16px; }
 .content-management-list { display: grid; gap: 8px; }
 .admin-metrics { margin-bottom: 16px; }
