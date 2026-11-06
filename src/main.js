@@ -124,6 +124,7 @@ async function loadBackendState() {
     ...topic,
     id: Number(topic.id),
     subject_id: Number(topic.subject_id),
+    subject: subjects.find((subject) => Number(subject.id) === Number(topic.subject_id))?.name || '',
   }));
   state.user = data.user;
   state.sets = data.sets.map((set) => ({ ...set, id: String(set.id), cards: set.cards || [] }));
@@ -423,13 +424,18 @@ function flashcardsPage() {
 
 function setCard(set) {
   const created = set.created_at ? new Date(set.created_at).toLocaleDateString() : '';
-  return `<article class="panel set-card" data-title="${escapeHtml(`${set.title} ${set.subject}`.toLowerCase())}" data-subject="${escapeHtml(set.subject || '')}" data-cards="${set.cards.length}"><div class="set-art ${subjectColor(set.subject || '')}"><span>${subjectIcon(set.subject || '')}</span><small>${escapeHtml((set.subject || 'MY STUDY SET').toUpperCase())}</small></div><div class="set-card-body"><span class="eyebrow">${escapeHtml(set.topic || set.subject || 'MY STUDY SET')}</span><h3>${escapeHtml(set.title)}</h3><p>${escapeHtml(set.description || '')}</p><div class="set-meta"><span>▣ ${set.cards.length} cards</span><span>${created ? `Created ${escapeHtml(created)}` : ''}</span></div><div class="set-actions"><a href="#/study/${encodeURIComponent(set.id)}" class="button button-primary button-small">Study set →</a><a href="#/flashcards/edit/${encodeURIComponent(set.id)}" class="button button-outline button-small">Edit</a><button class="icon-text danger-text" data-action="delete-set" data-id="${escapeHtml(set.id)}">Delete</button></div></div></article>`;
+  const pdfLink = set.pdf_original_name ? `<a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" class="text-link" target="_blank" rel="noopener">Open attached PDF ↗</a>` : '';
+  return `<article class="panel set-card" data-title="${escapeHtml(`${set.title} ${set.subject}`.toLowerCase())}" data-subject="${escapeHtml(set.subject || '')}" data-cards="${set.cards.length}"><div class="set-art ${subjectColor(set.subject || '')}"><span>${subjectIcon(set.subject || '')}</span><small>${escapeHtml((set.subject || 'MY STUDY SET').toUpperCase())}</small></div><div class="set-card-body"><span class="eyebrow">${escapeHtml(set.topic || set.subject || 'MY STUDY SET')}</span><h3>${escapeHtml(set.title)}</h3><p>${escapeHtml(set.description || '')}</p><div class="set-meta"><span>▣ ${set.cards.length} cards</span><span>${created ? `Created ${escapeHtml(created)}` : ''}</span></div>${pdfLink}<div class="set-actions"><a href="#/study/${encodeURIComponent(set.id)}" class="button button-primary button-small">Study set →</a><a href="#/flashcards/edit/${encodeURIComponent(set.id)}" class="button button-outline button-small">Edit</a><button class="icon-text danger-text" data-action="delete-set" data-id="${escapeHtml(set.id)}">Delete</button></div></div></article>`;
 }
 
 function flashcardForm(id) {
   const set = state.sets.find((item) => item.id === id);
   const cards = set?.cards || [{ term: '', answer: '' }, { term: '', answer: '' }];
-  return shell(`${heading(set ? 'MAKE IT YOUR OWN' : 'A FEW IDEAS TO REMEMBER', set ? 'Edit study set' : 'Create a study set', 'A good set starts with one question you want to remember.') }<form class="panel form-panel" id="set-form" data-id="${escapeHtml(id || '')}"><div class="form-grid"><label>Study set title<input name="title" required maxlength="120" value="${escapeHtml(set?.title || '')}" placeholder="e.g. Networking essentials" /></label><label>Subject<select name="subject"><option value="">Choose a subject</option>${subjects.map((s) => `<option value="${escapeHtml(s.name)}" ${set?.subject === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label><label class="full-field">Description<textarea name="description" rows="3" placeholder="What will you be learning?">${escapeHtml(set?.description || '')}</textarea></label><label>Topic<input name="topic" value="${escapeHtml(set?.topic || '')}" placeholder="e.g. Network Devices" /></label></div><div class="form-section-title"><div><h2>Your flashcards</h2><p>Add a term on one side and its answer on the other.</p></div><button type="button" class="button button-outline button-small" data-action="add-card">＋ Add a card</button></div><div id="card-fields">${cards.map((card, index) => flashcardFields(card, index)).join('')}</div><div class="form-actions"><a href="#/flashcards" class="button button-outline">Cancel</a><button class="button button-primary" type="submit">${set ? 'Save changes' : 'Create study set'} <span>→</span></button></div></form>`, set ? 'Edit study set' : 'Create study set', 'flashcards');
+  const isCustomTopic = Boolean(set?.custom_topic);
+  const existingTopic = topics.find((topic) => Number(topic.id) === Number(set?.topic_id))
+    || topics.find((topic) => topic.title === set?.topic && topic.subject === set?.subject);
+  const topicValue = isCustomTopic ? 'custom' : existingTopic ? String(existingTopic.id) : '';
+  return shell(`${heading(set ? 'MAKE IT YOUR OWN' : 'A FEW IDEAS TO REMEMBER', set ? 'Edit study set' : 'Create a study set', 'A good set starts with one question you want to remember.') }<form class="panel form-panel" id="set-form" data-id="${escapeHtml(id || '')}" data-has-pdf="${set?.pdf_original_name ? 'true' : ''}"><div class="form-grid"><label>Study set title<input name="title" required maxlength="120" value="${escapeHtml(set?.title || '')}" placeholder="e.g. Networking essentials" /></label><label>Subject<select name="subject"><option value="">Choose a subject</option>${subjects.map((s) => `<option value="${escapeHtml(s.name)}" ${set?.subject === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label><label class="full-field">Description<textarea name="description" rows="3" placeholder="What will you be learning?">${escapeHtml(set?.description || '')}</textarea></label><label>Topic<select name="topic_id" id="set-topic"><option value="">Choose a topic</option>${topics.map((topic) => `<option value="${topic.id}" ${String(topic.id) === topicValue ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}<option value="custom" ${topicValue === 'custom' ? 'selected' : ''}>Choose my own (upload a PDF)</option></select></label><div class="full-field" id="custom-topic-fields" ${topicValue === 'custom' ? '' : 'hidden'}><label>My topic<input name="custom_topic" maxlength="180" value="${escapeHtml(set?.custom_topic || '')}" placeholder="e.g. My biology reviewer" /></label><label>Choose a PDF ${set?.pdf_original_name ? '<span class="optional">(optional, max 20 MB)</span>' : '<span class="optional">(required, max 20 MB)</span>'}<input name="study_pdf" type="file" accept="application/pdf,.pdf" ${!set?.pdf_original_name && topicValue === 'custom' ? 'required' : ''} /><small class="form-help">Select a PDF from your device. It will be saved with your study set and available on your other devices.</small></label>${set?.pdf_original_name ? `<p class="form-help">Current PDF: <a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(set.pdf_original_name)} ↗</a></p><label class="check-row"><input type="checkbox" name="remove_study_pdf" value="1" /> Remove current PDF</label>` : ''}</div></div><div class="form-section-title"><div><h2>Your flashcards</h2><p>Add a term on one side and its answer on the other.</p></div><button type="button" class="button button-outline button-small" data-action="add-card">＋ Add a card</button></div><div id="card-fields">${cards.map((card, index) => flashcardFields(card, index)).join('')}</div><div class="form-actions"><a href="#/flashcards" class="button button-outline">Cancel</a><button class="button button-primary" type="submit">${set ? 'Save changes' : 'Create study set'} <span>→</span></button></div></form>`, set ? 'Edit study set' : 'Create study set', 'flashcards');
 }
 
 function flashcardFields(card, index) {
@@ -901,7 +907,6 @@ app.addEventListener('submit', async (event) => {
     return;
   }
   if (form.id === 'set-form') {
-    const values = formData(form);
     const terms = [...form.querySelectorAll('textarea[name="term"]')];
     const answers = [...form.querySelectorAll('textarea[name="answer"]')];
     const cards = terms.map((term, index) => ({ term: term.value.trim(), answer: answers[index].value.trim() }));
@@ -910,11 +915,13 @@ app.addEventListener('submit', async (event) => {
       return;
     }
     const id = form.dataset.id || `set-${Date.now()}`;
-    const set = { id, title: values.title.trim(), description: values.description.trim(), subject: values.subject, topic: values.topic.trim(), cards };
     const exists = state.sets.some((item) => item.id === id);
+    const body = new FormData(form);
+    body.set('cards', JSON.stringify(cards));
+    if (body.get('topic_id') !== 'custom') body.delete('study_pdf');
     const result = await apiCall(exists ? `/study-sets/${encodeURIComponent(id)}` : '/study-sets', {
       method: exists ? 'PUT' : 'POST',
-      body: JSON.stringify(set),
+      body,
     });
     if (!result) return;
     const savedSet = { ...result, id: String(result.id) };
@@ -979,6 +986,14 @@ app.addEventListener('input', (event) => {
 });
 app.addEventListener('change', (event) => {
   if (['lesson-subject', 'set-subject', 'set-sort', 'quiz-subject'].includes(event.target.id)) filterCards();
+  if (event.target.id === 'set-subject') updateStudySetTopics(event.target.value);
+  if (event.target.id === 'set-topic') {
+    const customTopicFields = document.querySelector('#custom-topic-fields');
+    const isCustom = event.target.value === 'custom';
+    if (customTopicFields) customTopicFields.hidden = !isCustom;
+    const pdfInput = customTopicFields?.querySelector('[name="study_pdf"]');
+    if (pdfInput) pdfInput.required = isCustom && !document.querySelector('#set-form')?.dataset.hasPdf;
+  }
   if (event.target.matches('.quiz-question-type')) {
     const row = event.target.closest('.quiz-question-editor');
     const type = event.target.value;
@@ -1022,6 +1037,18 @@ function filterCards() {
   document.querySelectorAll('.quiz-card').forEach((card) => {
     card.hidden = !(card.dataset.title.includes(quizSearch) && (!quizSubject || card.dataset.subject === quizSubject));
   });
+}
+
+function updateStudySetTopics(subjectName) {
+  const select = document.querySelector('#set-topic');
+  if (!select) return;
+  const selected = select.value;
+  const availableTopics = subjectName ? topics.filter((topic) => topic.subject === subjectName) : topics;
+  select.innerHTML = `<option value="">Choose a topic</option>${availableTopics.map((topic) => `<option value="${topic.id}">${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}<option value="custom">Choose my own (upload a PDF)</option>`;
+  if (selected === 'custom' || availableTopics.some((topic) => String(topic.id) === selected)) {
+    select.value = selected;
+  }
+  select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 app.addEventListener('click', async (event) => {

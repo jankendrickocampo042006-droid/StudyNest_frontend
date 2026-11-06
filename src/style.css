@@ -208,6 +208,7 @@ form label { display: grid; gap: 7px; color: #65736a; font-size: 10px; font-weig
 form input:not([type="checkbox"]), form textarea, form select { width: 100%; min-height: 40px; padding: 10px 11px; border: 1px solid #e5ebe5; border-radius: 7px; background: #fff; color: #3e5045; font-size: 11px; resize: vertical; }
 form input::placeholder, form textarea::placeholder { color: #b0b9b3; }
 .full-field { grid-column: 1 / -1; }
+#custom-topic-fields[hidden] { display: none !important; }
 .form-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 25px 0 12px; padding-top: 20px; border-top: 1px solid #edf0ed; }
 .form-section-title h2 { margin: 0 0 4px; font-size: 15px; }
 .form-section-title p { margin: 0; color: #99a39c; font-size: 9px; }
