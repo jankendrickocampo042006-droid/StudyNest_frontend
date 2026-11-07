@@ -64,6 +64,7 @@ svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width:
 .mobile-menu { display: none; }
 .page-content { max-width: 1380px; min-height: calc(100vh - 114px); padding: 34px 42px 44px; margin: 0 auto; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.page-heading-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .eyebrow { color: #8b9991; font-size: 9px; font-weight: 700; letter-spacing: 1.15px; }
 h1, h2, h3, p { margin-top: 0; }
 h1, h2, h3 { color: var(--ink); font-family: "Manrope", sans-serif; }
@@ -620,11 +621,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .private-content-row p { margin: 5px 0; color: #78847b; font-size: 10px; line-height: 1.6; }
 .private-content-row .private-lesson-notes { white-space: pre-wrap; }
 .private-content-row .text-link { font-size: 10px; }
+.private-pdf-actions { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 7px; }
 .private-content-row .admin-content-actions { align-items: center; }
 .private-library-form .quiz-question-editor { margin: 12px 0; }
+.certificate-list { display: grid; gap: 12px; }
+.certificate-card { display: flex; align-items: center; gap: 18px; padding: 22px; }
+.certificate-mark { display: grid; flex: 0 0 50px; width: 50px; height: 50px; place-items: center; border-radius: 50%; background: #f3f5e9; color: #8c8050; font-size: 27px; }
+.certificate-card > div { min-width: 0; flex: 1; }
+.certificate-card h2 { margin: 5px 0; font-size: 17px; }
+.certificate-card p { margin: 0 0 6px; color: #78847b; font-size: 11px; }
+.certificate-card small { color: #919d95; font-size: 9px; }
 @media (max-width: 700px) {
+  .page-heading-actions { width: 100%; }
   .private-subject-card { padding: 15px; }
   .private-subject-card > .section-title, .private-topic-card .section-title { align-items: flex-start; flex-direction: column; }
   .private-topic-card { padding: 12px; }
   .private-content-row { flex-direction: column; }
+  .certificate-card { align-items: flex-start; flex-direction: column; }
 }

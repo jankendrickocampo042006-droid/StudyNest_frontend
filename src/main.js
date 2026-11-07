@@ -26,6 +26,7 @@ let state = {
   studyTimeSeconds: 0,
   weakTopics: [],
   weeklyStudy: [],
+  certificates: [],
   notifications: [],
   quizResult: null,
   activeLessonId: null,
@@ -66,6 +67,102 @@ function notify(message) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
 }
 
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map((value) => {
+    let cell = String(value ?? '');
+    if (/^[\s]*[=+\-@]/.test(cell)) cell = `'${cell}`;
+    return `"${cell.replace(/"/g, '""')}"`;
+  }).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function reportDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function downloadReport(report, kind = '') {
+  const generated = new Date().toISOString();
+  let rows;
+  let filename;
+  if (report === 'progress') {
+    const averageScore = state.attempts.length
+      ? Math.round(state.attempts.reduce((total, attempt) => total + Number(attempt.score), 0) / state.attempts.length)
+      : 0;
+    rows = [
+      ['Section', 'Date', 'Subject', 'Metric', 'Value'],
+      ['Summary', generated, '', 'Student', state.user?.name || ''],
+      ['Summary', generated, '', 'Email', state.user?.email || ''],
+      ['Summary', generated, '', 'Study time (seconds)', state.studyTimeSeconds],
+      ['Summary', generated, '', 'Lessons reviewed', state.reviewedLessons.length],
+      ['Summary', generated, '', 'Quizzes completed', state.attempts.length],
+      ['Summary', generated, '', 'Average quiz score (%)', averageScore],
+      ...subjects.map((subject) => ['Subject', generated, subject.name, 'Lesson completion (%)', subject.progress]),
+      ...subjects.map((subject) => ['Subject', generated, subject.name, 'Lessons available', subject.lessons]),
+      ...state.weeklyStudy.map((day) => ['Daily study', day.study_date, '', 'Study time (seconds)', day.duration_seconds]),
+    ];
+    filename = `studynest-progress-${reportDate()}.csv`;
+  } else if (report === 'history') {
+    rows = [
+      ['Quiz', 'Subject', 'Score (%)', 'Completed at'],
+      ...state.attempts.map((attempt) => [attempt.title, attempt.subject, attempt.score, new Date(attempt.date).toISOString()]),
+    ];
+    filename = `studynest-quiz-history-${reportDate()}.csv`;
+  } else if (report === 'students') {
+    rows = [
+      ['Name', 'Email', 'Account status', 'Joined'],
+      ...students.map((student) => [
+        student.name,
+        student.email,
+        Number(student.is_active) === 1 && student.email_verified_at ? 'Active' : 'Inactive or unverified',
+        student.created_at,
+      ]),
+    ];
+    filename = `studynest-students-${reportDate()}.csv`;
+  } else if (report === 'teachers') {
+    rows = [
+      ['Name', 'Email', 'Teacher ID', 'Joined'],
+      ...teachers.map((teacher) => [teacher.name, teacher.email, teacher.teacher_id || '', teacher.created_at || '']),
+    ];
+    filename = `studynest-teachers-${reportDate()}.csv`;
+  } else if (report === 'catalog' && ['subjects', 'topics', 'lessons', 'quizzes'].includes(kind)) {
+    const entries = management[kind] || [];
+    rows = [
+      ['Type', 'Name', 'Subject', 'Topic', 'Description or lesson content', 'Duration (minutes)', 'Question count', 'PDF filename', 'PDF download URL'],
+      ...entries.map((entry) => {
+        const name = entry.name || entry.title || '';
+        const pdfUrl = kind === 'lessons' && entry.pdf_original_name
+          ? `${apiBase}/api/lessons/${encodeURIComponent(entry.id)}/pdf?download=1`
+          : '';
+        return [
+          ({ subjects: 'Subject', topics: 'Topic', lessons: 'Lesson', quizzes: 'Quiz' })[kind],
+          name,
+          entry.subject || '',
+          entry.topic || '',
+          kind === 'subjects' ? entry.description || '' : kind === 'lessons' ? entry.content || '' : '',
+          kind === 'quizzes' ? entry.time || '' : '',
+          kind === 'quizzes' ? (entry.questions || []).length : '',
+          entry.pdf_original_name || '',
+          pdfUrl,
+        ];
+      }),
+    ];
+    filename = `studynest-${kind}-${reportDate()}.csv`;
+  } else {
+    notify('This report is not available.');
+    return;
+  }
+  downloadCsv(filename, rows);
+  notify('Your CSV report has been downloaded.');
+}
+
 function save(key, value) {
   state[key] = value;
 }
@@ -90,6 +187,18 @@ async function apiCall(path, options = {}) {
     notify(error instanceof Error ? error.message : 'StudyNest could not complete that request.');
     return null;
   }
+}
+
+async function refreshCertificates(showNewCertificate = false) {
+  const certificates = await apiCall('/certificates');
+  if (!Array.isArray(certificates)) return false;
+  const previousIds = new Set(state.certificates.map((certificate) => String(certificate.id)));
+  state.certificates = certificates.map((certificate) => ({ ...certificate, id: Number(certificate.id) }));
+  if (showNewCertificate) {
+    const earned = state.certificates.find((certificate) => !previousIds.has(String(certificate.id)));
+    if (earned) notify(`Congratulations! You earned a certificate for ${earned.subject_name}. View it in your profile.`);
+  }
+  return true;
 }
 
 async function restoreInitialSession() {
@@ -128,6 +237,8 @@ async function loadBackendState() {
     subject: subjects.find((subject) => Number(subject.id) === Number(topic.subject_id))?.name || '',
   }));
   state.user = data.user;
+  state.certificates = [];
+  if (state.user?.role === 'user') await refreshCertificates();
   state.sets = data.sets.map((set) => ({ ...set, id: String(set.id), cards: set.cards || [] }));
   privateLibrary = data.user ? await apiCall('/my-library') || [] : [];
   state.schedules = data.schedules.map((item) => ({ ...item, id: String(item.id), time: item.time.slice(0, 5) }));
@@ -371,7 +482,7 @@ function progressPage() {
     };
   });
   const maxStudy = Math.max(1, ...dailyStudy.map((day) => day.seconds));
-  return shell(`${heading('A VIEW OF YOUR JOURNEY', 'Study progress', 'Progress from your saved lessons and quiz attempts.') }
+  return shell(`${heading('A VIEW OF YOUR JOURNEY', 'Study progress', 'Progress from your saved lessons and quiz attempts.', '<button class="button button-outline" data-action="download-report" data-report="progress">Download progress CSV ↓</button>')}
     <div class="metric-grid">${metric('Study time', `${studyHours} hrs`, 'Tracked lesson and quiz time', 'mint', '◷')}${metric('Lessons reviewed', state.reviewedLessons.length, 'Across your subjects', 'peach', '▤')}${metric('Quizzes completed', state.attempts.length, 'Every practice counts', 'lavender', '✓')}${metric('Average score', `${averageScore}%`, 'Across completed attempts', 'sky', '↗')}</div>
     <div class="dashboard-grid progress-grid"><section class="panel wide-panel"><div class="section-title"><div><div class="eyebrow">STEADY STEPS</div><h2>Study time over the last 7 days</h2></div></div><div class="chart-area"><div class="chart-y"><span>${Math.ceil(maxStudy / 3600)}h</span><span>${Math.ceil(maxStudy / 7200)}h</span><span>0h</span></div><div class="chart-bars">${dailyStudy.map((day) => `<div class="chart-column"><span style="height:${Math.max(day.seconds ? 4 : 0, day.seconds / maxStudy * 100)}%"></span><small>${day.label}</small></div>`).join('')}</div></div><div class="chart-legend"><span></span> Tracked study time</div></section><section class="panel"><div class="section-title"><div><div class="eyebrow">SUBJECT BY SUBJECT</div><h2>Lessons reviewed</h2></div></div><div class="performance-list">${subjects.map((s) => `<div class="performance-row"><div><span class="mini-icon ${s.color}">${s.icon}</span><b>${escapeHtml(s.name)}</b><strong>${s.progress}%</strong></div><div class="progress-line"><span style="width:${s.progress}%"></span></div></div>`).join('') || '<p class="empty-state">No subjects yet.</p>'}</div></section><section class="panel"><div class="section-title"><div><div class="eyebrow">ROOM TO GROW</div><h2>Topics to revisit</h2></div></div>${state.weakTopics.map((topic) => `<div class="weak-topic"><span class="topic-mark">↗</span><div><b>${escapeHtml(topic.title)}</b><small>${escapeHtml(topic.subject)} · ${topic.average_score}% average</small></div><a href="#/quizzes">Practice →</a></div>`).join('') || '<p class="empty-state">Complete quizzes to see topics that need a review.</p>'}</section></div>`, 'Study progress', 'progress');
 }
@@ -431,7 +542,7 @@ function privateLibraryPage() {
     <div class="admin-content-actions"><button class="quiet-button" data-action="private-add-topic" data-id="${subject.id}">＋ Add topic</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="subjects" data-id="${subject.id}" data-title="${escapeHtml(subject.name)}">Delete</button></div></div>
     ${(subject.topics || []).map((topic) => `<article class="private-topic-card"><div class="section-title"><div><span class="eyebrow">TOPIC</span><h3>${escapeHtml(topic.title)}</h3></div><div class="admin-content-actions"><button class="quiet-button" data-action="private-add-lesson" data-id="${topic.id}">＋ Lesson</button><button class="quiet-button" data-action="private-add-quiz" data-id="${topic.id}">＋ Quiz</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="topics" data-id="${topic.id}" data-title="${escapeHtml(topic.title)}">Delete</button></div></div>
       <div class="private-content-list">
-        ${(topic.lessons || []).map((lesson) => `<div class="private-content-row"><div><b>${escapeHtml(lesson.title)}</b><p class="private-lesson-notes">${escapeHtml(lesson.content || '')}</p>${lesson.pdf_original_name ? `<a class="text-link" href="${apiBase}/api/my-library/lessons/${encodeURIComponent(lesson.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(lesson.pdf_original_name)} ↗</a>` : ''}</div><button class="quiet-button danger-text" data-action="private-delete" data-kind="lessons" data-id="${lesson.id}" data-title="${escapeHtml(lesson.title)}">Delete</button></div>`).join('')}
+        ${(topic.lessons || []).map((lesson) => `<div class="private-content-row"><div><b>${escapeHtml(lesson.title)}</b><p class="private-lesson-notes">${escapeHtml(lesson.content || '')}</p>${lesson.pdf_original_name ? `<div class="private-pdf-actions"><a class="text-link" href="${apiBase}/api/my-library/lessons/${encodeURIComponent(lesson.id)}/pdf" target="_blank" rel="noopener">View PDF ↗</a><a class="text-link" href="${apiBase}/api/my-library/lessons/${encodeURIComponent(lesson.id)}/pdf?download=1">Download PDF ↓</a></div>` : ''}</div><button class="quiet-button danger-text" data-action="private-delete" data-kind="lessons" data-id="${lesson.id}" data-title="${escapeHtml(lesson.title)}">Delete</button></div>`).join('')}
         ${(topic.quizzes || []).map((quiz) => `<div class="private-content-row"><div><b>${escapeHtml(quiz.title)}</b><p>${quiz.questions} questions · ${quiz.time} minutes</p></div><div class="admin-content-actions"><button class="button button-outline button-small" data-action="start-quiz" data-id="private-${quiz.id}">Start quiz →</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="quizzes" data-id="${quiz.id}" data-title="${escapeHtml(quiz.title)}">Delete</button></div></div>`).join('')}
         ${!(topic.lessons || []).length && !(topic.quizzes || []).length ? '<p class="empty-state">No lessons or quizzes yet. Add something to start studying.</p>' : ''}
       </div>
@@ -467,7 +578,7 @@ function privateLibraryForm(kind, id = '') {
 
 function setCard(set) {
   const created = set.created_at ? new Date(set.created_at).toLocaleDateString() : '';
-  const pdfLink = set.pdf_original_name ? `<a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" class="text-link" target="_blank" rel="noopener">Open attached PDF ↗</a>` : '';
+  const pdfLink = set.pdf_original_name ? `<div class="private-pdf-actions"><a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" class="text-link" target="_blank" rel="noopener">Open attached PDF ↗</a><a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf?download=1" class="text-link">Download PDF ↓</a></div>` : '';
   return `<article class="panel set-card" data-title="${escapeHtml(`${set.title} ${set.subject}`.toLowerCase())}" data-subject="${escapeHtml(set.subject || '')}" data-cards="${set.cards.length}"><div class="set-art ${subjectColor(set.subject || '')}"><span>${subjectIcon(set.subject || '')}</span><small>${escapeHtml((set.subject || 'MY STUDY SET').toUpperCase())}</small></div><div class="set-card-body"><span class="eyebrow">${escapeHtml(set.topic || set.subject || 'MY STUDY SET')}</span><h3>${escapeHtml(set.title)}</h3><p>${escapeHtml(set.description || '')}</p><div class="set-meta"><span>▣ ${set.cards.length} cards</span><span>${created ? `Created ${escapeHtml(created)}` : ''}</span></div>${pdfLink}<div class="set-actions"><a href="#/study/${encodeURIComponent(set.id)}" class="button button-primary button-small">Study set →</a><a href="#/flashcards/edit/${encodeURIComponent(set.id)}" class="button button-outline button-small">Edit</a><button class="icon-text danger-text" data-action="delete-set" data-id="${escapeHtml(set.id)}">Delete</button></div></div></article>`;
 }
 
@@ -478,7 +589,7 @@ function flashcardForm(id) {
   const existingTopic = topics.find((topic) => Number(topic.id) === Number(set?.topic_id))
     || topics.find((topic) => topic.title === set?.topic && topic.subject === set?.subject);
   const topicValue = isCustomTopic ? 'custom' : existingTopic ? String(existingTopic.id) : '';
-  return shell(`${heading(set ? 'MAKE IT YOUR OWN' : 'A FEW IDEAS TO REMEMBER', set ? 'Edit study set' : 'Create a study set', 'A good set starts with one question you want to remember.') }<form class="panel form-panel" id="set-form" data-id="${escapeHtml(id || '')}" data-has-pdf="${set?.pdf_original_name ? 'true' : ''}"><div class="form-grid"><label>Study set title<input name="title" required maxlength="120" value="${escapeHtml(set?.title || '')}" placeholder="e.g. Networking essentials" /></label><div id="set-subject-field" ${isCustomTopic ? 'hidden' : ''}><label>Subject<select name="subject"><option value="">Choose a subject</option>${subjects.map((s) => `<option value="${escapeHtml(s.name)}" ${!isCustomTopic && set?.subject === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label></div><label class="full-field">Description<textarea name="description" rows="3" placeholder="What will you be learning?">${escapeHtml(set?.description || '')}</textarea></label><label>Topic<select name="topic_id" id="set-topic"><option value="">Choose a topic</option>${topics.map((topic) => `<option value="${topic.id}" ${String(topic.id) === topicValue ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}<option value="custom" ${topicValue === 'custom' ? 'selected' : ''}>Choose my own (upload a PDF)</option></select></label><div class="full-field" id="custom-topic-fields" ${topicValue === 'custom' ? '' : 'hidden'}><label>My topic<input name="custom_topic" maxlength="180" value="${escapeHtml(set?.custom_topic || '')}" placeholder="e.g. My biology reviewer" /></label><label>Choose a PDF ${set?.pdf_original_name ? '<span class="optional">(optional, max 20 MB)</span>' : '<span class="optional">(required, max 20 MB)</span>'}<input name="study_pdf" type="file" accept="application/pdf,.pdf" ${!set?.pdf_original_name && topicValue === 'custom' ? 'required' : ''} /><small class="form-help">Select a PDF from your device. It will be saved with your study set and available on your other devices.</small></label>${set?.pdf_original_name ? `<p class="form-help">Current PDF: <a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(set.pdf_original_name)} ↗</a></p><label class="check-row"><input type="checkbox" name="remove_study_pdf" value="1" /> Remove current PDF</label>` : ''}</div></div><div class="form-section-title"><div><h2>Your flashcards</h2><p>Add a term on one side and its answer on the other.</p></div><button type="button" class="button button-outline button-small" data-action="add-card">＋ Add a card</button></div><div id="card-fields">${cards.map((card, index) => flashcardFields(card, index)).join('')}</div><div class="form-actions"><a href="#/flashcards" class="button button-outline">Cancel</a><button class="button button-primary" type="submit">${set ? 'Save changes' : 'Create study set'} <span>→</span></button></div></form>`, set ? 'Edit study set' : 'Create study set', 'flashcards');
+  return shell(`${heading(set ? 'MAKE IT YOUR OWN' : 'A FEW IDEAS TO REMEMBER', set ? 'Edit study set' : 'Create a study set', 'A good set starts with one question you want to remember.') }<form class="panel form-panel" id="set-form" data-id="${escapeHtml(id || '')}" data-has-pdf="${set?.pdf_original_name ? 'true' : ''}"><div class="form-grid"><label>Study set title<input name="title" required maxlength="120" value="${escapeHtml(set?.title || '')}" placeholder="e.g. Networking essentials" /></label><div id="set-subject-field" ${isCustomTopic ? 'hidden' : ''}><label>Subject<select name="subject"><option value="">Choose a subject</option>${subjects.map((s) => `<option value="${escapeHtml(s.name)}" ${!isCustomTopic && set?.subject === s.name ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></label></div><label class="full-field">Description<textarea name="description" rows="3" placeholder="What will you be learning?">${escapeHtml(set?.description || '')}</textarea></label><label>Topic<select name="topic_id" id="set-topic"><option value="">Choose a topic</option>${topics.map((topic) => `<option value="${topic.id}" ${String(topic.id) === topicValue ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}<option value="custom" ${topicValue === 'custom' ? 'selected' : ''}>Choose my own (upload a PDF)</option></select></label><div class="full-field" id="custom-topic-fields" ${topicValue === 'custom' ? '' : 'hidden'}><label>My topic<input name="custom_topic" maxlength="180" value="${escapeHtml(set?.custom_topic || '')}" placeholder="e.g. My biology reviewer" /></label><label>Choose a PDF ${set?.pdf_original_name ? '<span class="optional">(optional, max 20 MB)</span>' : '<span class="optional">(required, max 20 MB)</span>'}<input name="study_pdf" type="file" accept="application/pdf,.pdf" ${!set?.pdf_original_name && topicValue === 'custom' ? 'required' : ''} /><small class="form-help">Select a PDF from your device. It will be saved with your study set and available on your other devices.</small></label>${set?.pdf_original_name ? `<div class="private-pdf-actions"><a class="text-link" href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" target="_blank" rel="noopener">${escapeHtml(set.pdf_original_name)} ↗</a><a class="text-link" href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf?download=1">Download PDF ↓</a></div><label class="check-row"><input type="checkbox" name="remove_study_pdf" value="1" /> Remove current PDF</label>` : ''}</div></div><div class="form-section-title"><div><h2>Your flashcards</h2><p>Add a term on one side and its answer on the other.</p></div><button type="button" class="button button-outline button-small" data-action="add-card">＋ Add a card</button></div><div id="card-fields">${cards.map((card, index) => flashcardFields(card, index)).join('')}</div><div class="form-actions"><a href="#/flashcards" class="button button-outline">Cancel</a><button class="button button-primary" type="submit">${set ? 'Save changes' : 'Create study set'} <span>→</span></button></div></form>`, set ? 'Edit study set' : 'Create study set', 'flashcards');
 }
 
 function flashcardFields(card, index) {
@@ -533,7 +644,7 @@ function quizResult() {
 }
 
 function historyPage() {
-  return shell(`${heading('EVERY PRACTICE COUNTS', 'Quiz history', 'Look back at how much you’ve been learning.') }<section class="panel history-panel"><div class="section-title"><div><h2>Your recent quizzes</h2><p>A small snapshot of your practice so far.</p></div></div><div class="table-wrap"><table><thead><tr><th>QUIZ</th><th>SUBJECT</th><th>DATE</th><th>SCORE</th><th></th></tr></thead><tbody>${state.attempts.map((attempt) => `<tr><td><b>${escapeHtml(attempt.title)}</b></td><td>${escapeHtml(attempt.subject)}</td><td>${new Date(attempt.date).toLocaleString()}</td><td><span class="score-pill ${attempt.score >= 80 ? 'score-good' : ''}">${attempt.score}%</span></td><td><a class="text-link" href="#/quizzes">Practice again →</a></td></tr>`).join('') || '<tr><td colspan="5">No quiz attempts yet.</td></tr>'}</tbody></table></div></section>`, 'Quiz history', 'quizzes');
+  return shell(`${heading('EVERY PRACTICE COUNTS', 'Quiz history', 'Look back at how much you’ve been learning.', '<button class="button button-outline" data-action="download-report" data-report="history">Download quiz history CSV ↓</button>')}<section class="panel history-panel"><div class="section-title"><div><h2>Your recent quizzes</h2><p>A small snapshot of your practice so far.</p></div></div><div class="table-wrap"><table><thead><tr><th>QUIZ</th><th>SUBJECT</th><th>DATE</th><th>SCORE</th><th></th></tr></thead><tbody>${state.attempts.map((attempt) => `<tr><td><b>${escapeHtml(attempt.title)}</b></td><td>${escapeHtml(attempt.subject)}</td><td>${new Date(attempt.date).toLocaleString()}</td><td><span class="score-pill ${attempt.score >= 80 ? 'score-good' : ''}">${attempt.score}%</span></td><td><a class="text-link" href="#/quizzes">Practice again →</a></td></tr>`).join('') || '<tr><td colspan="5">No quiz attempts yet.</td></tr>'}</tbody></table></div></section>`, 'Quiz history', 'quizzes');
 }
 
 function favoritesPage() {
@@ -586,7 +697,7 @@ function managementPage() {
     const body = `<div class="admin-record-list">${teachers.map((teacher) => `<article class="admin-record-row" data-admin-search="${escapeHtml(`${teacher.name} ${teacher.email} ${teacher.teacher_id || ''}`.toLowerCase())}">
       <span class="admin-record-icon">${icon('settings')}</span><div class="admin-content-copy"><b>${escapeHtml(teacher.name)}</b><small>${escapeHtml(teacher.email)}${teacher.teacher_id ? ` · ID: ${escapeHtml(teacher.teacher_id)}` : ''}</small></div><span class="role-badge">Teacher</span>
     </article>`).join('') || '<div class="admin-empty"><p>No teacher accounts yet. Add a teacher to share responsibility for the learning catalog.</p></div>'}</div>`;
-    return shell(`${heading('PEOPLE & ACCESS', 'Teachers', 'Manage the teachers who can create and maintain learning content.', '<button class="button button-primary" data-action="new-teacher">＋ Add teacher</button>')}
+    return shell(`${heading('PEOPLE & ACCESS', 'Teachers', 'Manage the teachers who can create and maintain learning content.', '<div class="page-heading-actions"><button class="button button-outline" data-action="download-report" data-report="teachers">Download CSV ↓</button><button class="button button-primary" data-action="new-teacher">＋ Add teacher</button></div>')}
       <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Teacher accounts</b><small>${teachers.length} active ${teachers.length === 1 ? 'teacher' : 'teachers'}</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search teachers" placeholder="Search teachers..." /></label></div>${body}</section>`,
     'Teachers', 'manage-teachers');
   }
@@ -595,7 +706,7 @@ function managementPage() {
     const body = `<div class="admin-record-list">${students.map((student) => `<article class="admin-record-row" data-admin-search="${escapeHtml(`${student.name} ${student.email}`.toLowerCase())}">
       <span class="admin-record-icon">${icon('home')}</span><div class="admin-content-copy"><b>${escapeHtml(student.name)}</b><small>${escapeHtml(student.email)}</small></div><span class="role-badge">Student</span><small>${Number(student.is_active) === 1 && student.email_verified_at ? 'Active' : 'Inactive or unverified'} · Joined ${escapeHtml(new Date(student.created_at).toLocaleDateString())}</small>
     </article>`).join('') || '<div class="admin-empty"><p>No student accounts yet.</p></div>'}</div>`;
-    return shell(`${heading('PEOPLE & ACCESS', 'Students', 'View student accounts registered in StudyNest.')}
+    return shell(`${heading('PEOPLE & ACCESS', 'Students', 'View student accounts registered in StudyNest.', '<button class="button button-outline" data-action="download-report" data-report="students">Download student list CSV ↓</button>')}
       <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Student accounts</b><small>${students.length} ${students.length === 1 ? 'student' : 'students'}</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search students" placeholder="Search students..." /></label></div>${body}</section>`,
     'Students', 'manage-students');
   }
@@ -633,7 +744,7 @@ function managementPage() {
       <div class="admin-content-actions"><button class="quiet-button" data-action="edit-content" data-kind="${kind}" data-id="${entry.id}">Edit</button><button class="quiet-button danger-text" data-action="delete-content" data-kind="${kind}" data-id="${entry.id}" data-title="${escapeHtml(name)}">Delete</button></div>
     </article>`;
   }).join('') || `<div class="admin-empty"><p>No ${kind} yet. Add your first ${singular} to start building the student catalog.</p><button class="button button-outline button-small" data-action="new-content" data-kind="${kind}">＋ Create ${singular}</button></div>`;
-  const headingAction = `<button class="button button-primary" data-action="new-content" data-kind="${kind}">＋ Add ${singular}</button>`;
+  const headingAction = `<div class="page-heading-actions"><button class="button button-outline" data-action="download-report" data-report="catalog" data-kind="${kind}">Download CSV ↓</button><button class="button button-primary" data-action="new-content" data-kind="${kind}">＋ Add ${singular}</button></div>`;
   return shell(`${heading('LEARNING CATALOG', title, description, headingAction)}
     <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>All ${kind}</b><small>${entries.length} ${entries.length === 1 ? singular : kind} in your catalog</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search ${kind}" placeholder="Search ${kind}..." /></label></div><div class="admin-record-list">${rows}</div></section>`,
   title, `manage-${section}`);
@@ -668,7 +779,7 @@ function contentForm(kind, id = '') {
     fields = `<label>Subject<select name="subject_id" required><option value="">Choose a subject</option>${management.subjects.map((subject) => `<option value="${subject.id}" ${Number(entry.subject_id) === Number(subject.id) ? 'selected' : ''}>${escapeHtml(subject.name)}</option>`).join('')}</select></label><label>Topic title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Summary<textarea name="summary" rows="3">${escapeHtml(entry.summary || '')}</textarea></label>`;
   } else if (kind === 'lessons') {
     const pdfUrl = `${apiBase}/api/lessons/${encodeURIComponent(id)}/pdf`;
-    fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Lesson title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Lesson content<textarea name="content" required rows="8">${escapeHtml(entry.content || '')}</textarea></label><label>PDF study material <span class="optional">(optional, max 20 MB)</span><input name="pdf_attachment" type="file" accept="application/pdf,.pdf" /><small class="form-help">Students will be able to view or download this file from the lesson page.</small></label>${entry.pdf_original_name ? `<div class="current-pdf"><a href="${pdfUrl}" target="_blank" rel="noopener">View current PDF: ${escapeHtml(entry.pdf_original_name)} ↗</a><label class="check-row"><input type="checkbox" name="remove_pdf_attachment" value="1" /> Remove current PDF</label></div>` : ''}`;
+    fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Lesson title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Lesson content<textarea name="content" required rows="8">${escapeHtml(entry.content || '')}</textarea></label><label>PDF study material <span class="optional">(optional, max 20 MB)</span><input name="pdf_attachment" type="file" accept="application/pdf,.pdf" /><small class="form-help">Students will be able to view or download this file from the lesson page.</small></label>${entry.pdf_original_name ? `<div class="current-pdf"><a href="${pdfUrl}" target="_blank" rel="noopener">View current PDF: ${escapeHtml(entry.pdf_original_name)} ↗</a><a href="${pdfUrl}?download=1" class="text-link">Download PDF ↓</a><label class="check-row"><input type="checkbox" name="remove_pdf_attachment" value="1" /> Remove current PDF</label></div>` : ''}`;
   } else {
     const questions = entry.questions?.length ? entry.questions : [{}];
     fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Quiz title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Duration in minutes<input name="duration_minutes" type="number" required min="1" max="600" value="${escapeHtml(entry.time || 15)}" /></label><div class="form-section-title"><h2>Quiz questions</h2><button type="button" class="button button-outline button-small" data-action="add-content-question">＋ Add question</button></div><div id="quiz-question-fields">${questions.map((question, index) => questionFields(question, index)).join('')}</div>`;
@@ -680,7 +791,24 @@ function contentForm(kind, id = '') {
 }
 
 function profilePage() {
-  return shell(`${heading('THIS SPACE IS YOURS', 'Profile settings', 'A few details to make StudyNest feel like home.') }<form class="panel form-panel profile-form" id="profile-form"><div class="profile-avatar">${escapeHtml(initials(state.user?.name || ''))}</div><div class="form-grid"><label>Full name<input name="name" required maxlength="100" value="${escapeHtml(state.user?.name || '')}" /></label><label>Email address<input name="email" required type="email" value="${escapeHtml(state.user?.email || '')}" /></label><label class="full-field">New password <span class="optional">(leave blank to keep your current password)</span><input name="password" type="password" minlength="8" placeholder="At least 8 characters" /></label></div><div class="form-actions"><button type="submit" class="button button-primary">Save changes →</button></div></form>`, 'Profile settings', 'profile');
+  const certificateLink = state.user?.role === 'user'
+    ? `<a href="#/certificates" class="button button-outline">My certificates (${state.certificates.length}) →</a>`
+    : '';
+  return shell(`${heading('THIS SPACE IS YOURS', 'Profile settings', 'A few details to make StudyNest feel like home.', certificateLink)}<form class="panel form-panel profile-form" id="profile-form"><div class="profile-avatar">${escapeHtml(initials(state.user?.name || ''))}</div><div class="form-grid"><label>Full name<input name="name" required maxlength="100" value="${escapeHtml(state.user?.name || '')}" /></label><label>Email address<input name="email" required type="email" value="${escapeHtml(state.user?.email || '')}" /></label><label class="full-field">New password <span class="optional">(leave blank to keep your current password)</span><input name="password" type="password" minlength="8" placeholder="At least 8 characters" /></label></div><div class="form-actions"><button type="submit" class="button button-primary">Save changes →</button></div></form>`, 'Profile settings', 'profile');
+}
+
+function certificatesPage() {
+  const cards = state.certificates.map((certificate) => `<article class="panel certificate-card">
+    <span class="certificate-mark">✳</span>
+    <div><div class="eyebrow">CERTIFICATE OF COMPLETION</div><h2>${escapeHtml(certificate.subject_name)}</h2>
+      <p>Awarded to ${escapeHtml(certificate.student_name)} · Created and taught by ${escapeHtml(certificate.teacher_name)}</p>
+      <small>Issued ${escapeHtml(new Date(certificate.issued_at).toLocaleDateString())} · ID ${escapeHtml(certificate.certificate_code)}</small>
+    </div>
+    <a class="button button-primary" href="${apiBase}/api/certificates/${encodeURIComponent(certificate.id)}/download">Download certificate ↓</a>
+  </article>`).join('');
+  return shell(`${heading('YOUR ACHIEVEMENTS', 'My certificates', 'Certificates are awarded after you review every lesson and score at least 70% on each quiz in a teacher’s subject.', '<a href="#/profile" class="button button-outline">← Profile settings</a>')}
+    <div class="certificate-list">${cards || '<section class="panel empty-panel"><span>✳</span><h2>No certificates yet</h2><p>Finish every lesson and pass each quiz with at least 70% in a teacher-created subject. Your certificate will appear here automatically.</p><a class="button button-outline" href="#/subjects">Browse subjects →</a></section>'}</div>`,
+  'My certificates', 'profile');
 }
 
 function loginPage(register = false) {
@@ -754,6 +882,7 @@ function render() {
   else if (current === 'favorites') app.innerHTML = favoritesPage();
   else if (current === 'schedule') app.innerHTML = schedulePage();
   else if (current === 'profile') app.innerHTML = profilePage();
+  else if (current === 'certificates' && state.user.role === 'user') app.innerHTML = certificatesPage();
   else app.innerHTML = dashboard();
 }
 
@@ -1139,7 +1268,9 @@ app.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const { action, id } = button.dataset;
-  if (action === 'resend-otp') {
+  if (action === 'download-report') {
+    downloadReport(button.dataset.report, button.dataset.kind || '');
+  } else if (action === 'resend-otp') {
     const result = await apiCall('/auth/resend-otp', {
       method: 'POST',
       body: JSON.stringify({ email: button.dataset.email || '' }),
@@ -1259,6 +1390,7 @@ app.addEventListener('click', async (event) => {
     }
     render();
     notify('Lovely work. Your lesson is marked as reviewed.');
+    await refreshCertificates(true);
   } else if (action === 'delete-set') {
     if (window.confirm('Delete this study set and all its cards?')) {
       const result = await apiCall(`/study-sets/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -1382,6 +1514,7 @@ app.addEventListener('click', async (event) => {
       date: new Date().toISOString(),
     };
     save('attempts', [attempt, ...state.attempts]);
+    await refreshCertificates(true);
     go('quiz-results');
   }
 });
