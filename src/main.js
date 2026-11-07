@@ -28,6 +28,7 @@ let state = {
   weeklyStudy: [],
   certificates: [],
   notifications: [],
+  readNotificationIds: [],
   quizResult: null,
   activeLessonId: null,
   activePdfLessonId: null,
@@ -218,6 +219,42 @@ function canManageContent(role = state.user?.role) {
   return ['admin', 'moderator', 'teacher'].includes(role);
 }
 
+function notificationStorageKey(user = state.user) {
+  const identity = user?.id ?? user?.email;
+  return identity ? `studynest-read-notifications-${identity}` : '';
+}
+
+function storeReadNotifications() {
+  const key = notificationStorageKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(state.readNotificationIds));
+  } catch {
+    notify('Your notification read status could not be saved on this device.');
+  }
+}
+
+function unreadNotificationCount() {
+  return state.notifications.filter((item) => !state.readNotificationIds.includes(item.id)).length;
+}
+
+function markNotificationAsRead(id) {
+  if (!state.notifications.some((item) => item.id === id) || state.readNotificationIds.includes(id)) return;
+  state.readNotificationIds = [...state.readNotificationIds, id];
+  storeReadNotifications();
+  render();
+}
+
+function markAllNotificationsAsRead() {
+  const unreadIds = state.notifications
+    .filter((item) => !state.readNotificationIds.includes(item.id))
+    .map((item) => item.id);
+  if (!unreadIds.length) return;
+  state.readNotificationIds = [...new Set([...state.readNotificationIds, ...unreadIds])];
+  storeReadNotifications();
+  render();
+}
+
 function releaseLessonPdf() {
   if (state.activePdfUrl) URL.revokeObjectURL(state.activePdfUrl);
   state.activePdfUrl = null;
@@ -358,6 +395,13 @@ async function loadBackendState() {
     subject: subjects.find((subject) => Number(subject.id) === Number(topic.subject_id))?.name || '',
   }));
   state.user = data.user;
+  const notificationKey = notificationStorageKey(state.user);
+  try {
+    const savedReadIds = notificationKey ? JSON.parse(localStorage.getItem(notificationKey) || '[]') : [];
+    state.readNotificationIds = Array.isArray(savedReadIds) ? savedReadIds.filter((id) => typeof id === 'string') : [];
+  } catch {
+    state.readNotificationIds = [];
+  }
   state.certificates = [];
   if (state.user?.role === 'user') await refreshCertificates();
   state.sets = data.sets.map((set) => ({ ...set, id: String(set.id), cards: set.cards || [] }));
@@ -376,12 +420,14 @@ async function loadBackendState() {
   state.weakTopics = data.weakTopics;
   state.notifications = [
     ...state.schedules.filter((item) => new Date(`${item.date}T${item.time}`) >= new Date()).map((item) => ({
+      id: `schedule:${item.id}`,
       date: new Date(`${item.date}T${item.time}`),
       title: item.title,
       detail: `${item.date} · ${item.time}`,
       tone: 'mint',
     })),
     ...state.attempts.slice(0, 3).map((item) => ({
+      id: `quiz:${item.id ?? `${item.date}:${item.title}:${item.subject}`}`,
       date: new Date(item.date),
       title: `Quiz completed: ${item.title}`,
       detail: `${item.subject} · ${item.score}%`,
@@ -527,7 +573,7 @@ function shell(content, title, active) {
           <button class="mobile-menu" data-action="menu" aria-label="Open navigation">☰</button>
           <div class="breadcrumbs"><span>StudyNest</span><span class="crumb-slash">/</span><b>${escapeHtml(title)}</b></div>
           <div class="topbar-actions">
-            ${isAdmin ? '' : `<a class="icon-button" href="#/notifications" aria-label="Notifications">${icon('bell')}${state.notifications.length ? '<i></i>' : ''}</a>`}
+            ${isAdmin ? '' : `<a class="icon-button" href="#/notifications" aria-label="${unreadNotificationCount() ? `${unreadNotificationCount()} unread notifications` : 'Notifications'}">${icon('bell')}${unreadNotificationCount() ? '<i></i>' : ''}</a>`}
             <a class="user-chip" href="#/profile"><span class="avatar">${escapeHtml(initials(name))}</span><span><b>${escapeHtml(name)}</b><small>${escapeHtml(state.user?.role || 'user')}</small></span><span class="chevron">⌄</span></a>
           </div>
         </header>
@@ -614,7 +660,14 @@ function activitiesPage() {
 }
 
 function notificationsPage() {
-  return shell(`${heading('A FEW THINGS FOR YOU', 'Notifications', 'Upcoming sessions and completed quiz attempts.') }<div class="notification-list">${state.notifications.map((item) => `<article class="panel notification-card"><span class="notification-mark ${item.tone}">${icon('bell')}</span><div><small>${item.date.toLocaleString()}</small><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.detail)}</p></div></article>`).join('') || '<div class="panel empty-panel"><h2>You’re all caught up</h2><p>New scheduled sessions and quiz results will appear here.</p></div>'}</div>`, 'Notifications', 'notifications');
+  const unreadCount = unreadNotificationCount();
+  const action = unreadCount
+    ? '<button class="button button-outline" data-action="mark-all-notifications-read">Mark all as read</button>'
+    : '';
+  return shell(`${heading('A FEW THINGS FOR YOU', 'Notifications', 'Upcoming sessions and completed quiz attempts.', action)}<div class="notification-list">${state.notifications.map((item) => {
+    const isRead = state.readNotificationIds.includes(item.id);
+    return `<button type="button" class="panel notification-card ${isRead ? 'is-read' : 'is-unread'}" data-action="read-notification" data-id="${escapeHtml(item.id)}" aria-label="${isRead ? 'Read' : 'Unread'} notification: ${escapeHtml(item.title)}"><span class="notification-mark ${item.tone}">${icon('bell')}</span><span class="notification-copy"><small>${item.date.toLocaleString()}</small><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail)}</span></span><span class="notification-status">${isRead ? 'Read' : 'Unread'}</span></button>`;
+  }).join('') || '<div class="panel empty-panel"><h2>You’re all caught up</h2><p>New scheduled sessions and quiz results will appear here.</p></div>'}</div>`, 'Notifications', 'notifications');
 }
 
 function subjectsPage() {
@@ -1445,7 +1498,11 @@ app.addEventListener('click', async (event) => {
   const { action, id } = button.dataset;
   const finishLoading = beginLoading();
   try {
-  if (action === 'download-report') {
+  if (action === 'read-notification') {
+    markNotificationAsRead(id);
+  } else if (action === 'mark-all-notifications-read') {
+    markAllNotificationsAsRead();
+  } else if (action === 'download-report') {
     downloadReport(button.dataset.report, button.dataset.kind || '');
   } else if (action === 'resend-otp') {
     const result = await apiCall('/auth/resend-otp', {

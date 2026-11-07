@@ -339,16 +339,21 @@ td b { color: #536158; font-weight: 600; }
 .schedule-note h2 { max-width: 220px; margin: 8px 0; font-size: 18px; line-height: 1.45; }
 .schedule-note p { margin: 0; color: #859189; font-size: 10px; line-height: 1.8; }
 .notification-list { display: grid; gap: 10px; max-width: 850px; }
-.notification-card { display: flex; align-items: center; gap: 13px; padding: 14px 16px; }
+.notification-card { width: 100%; display: flex; align-items: center; gap: 13px; padding: 14px 16px; color: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+.notification-card:hover { border-color: #dcc2c9; box-shadow: 0 5px 16px #39242a0d; }
+.notification-card.is-unread { border-left: 3px solid var(--green); background: #fffafb; }
+.notification-card.is-read { opacity: .76; }
 .notification-mark { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 10px; }
 .notification-mark svg { width: 17px; }
 .notification-mark.mint { background: var(--mint); color: #5b8068; }
 .notification-mark.peach { background: var(--peach); color: #a77751; }
 .notification-mark.lavender { background: var(--lavender); color: #73628d; }
-.notification-card > div { flex: 1; }
+.notification-copy { min-width: 0; flex: 1; display: block; }
 .notification-card small { color: #9aa49e; font-size: 8px; }
-.notification-card h3 { margin: 4px 0; font-size: 11px; }
-.notification-card p { margin: 0; color: #89968e; font-size: 9px; }
+.notification-copy strong { display: block; margin: 4px 0; color: var(--ink); font-family: "Manrope", sans-serif; font-size: 11px; }
+.notification-copy > span { display: block; color: #89968e; font-size: 9px; }
+.notification-status { flex: 0 0 auto; color: #9c858c; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+.notification-card.is-unread .notification-status { color: var(--green); }
 .activity-panel { max-width: 800px; padding: 20px; }
 .activity-panel .section-title h2 { font-size: 14px; }
 .timeline-item { position: relative; display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid #edf0ed; }
