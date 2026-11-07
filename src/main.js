@@ -30,9 +30,15 @@ let state = {
   notifications: [],
   quizResult: null,
   activeLessonId: null,
+  activePdfLessonId: null,
+  activePdfUrl: null,
+  pdfLoadingLessonId: null,
+  pdfErrorMessage: '',
   lessonStartedAt: 0,
 };
 
+const lessonReviewRequests = new Set();
+const viewedPdfSyncRequests = new Set();
 let quizSession = null;
 let flashcardSession = null;
 let toastTimer;
@@ -171,6 +177,11 @@ function canManageContent(role = state.user?.role) {
   return ['admin', 'moderator', 'teacher'].includes(role);
 }
 
+function releaseLessonPdf() {
+  if (state.activePdfUrl) URL.revokeObjectURL(state.activePdfUrl);
+  state.activePdfUrl = null;
+}
+
 async function apiCall(path, options = {}) {
   try {
     if ((options.method || 'GET').toUpperCase() !== 'GET' && initialSessionRequest) {
@@ -201,6 +212,66 @@ async function refreshCertificates(showNewCertificate = false) {
   return true;
 }
 
+async function markLessonAsRead(lessonId) {
+  if (lessonReviewRequests.has(lessonId) || state.reviewedLessons.includes(lessonId)) return;
+  lessonReviewRequests.add(lessonId);
+  const duration = state.lessonStartedAt ? Math.min(7200, Math.floor((Date.now() - state.lessonStartedAt) / 1000)) : 0;
+  const result = await apiCall(`/lessons/${lessonId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ duration_seconds: duration }),
+  });
+  lessonReviewRequests.delete(lessonId);
+  if (!result) return;
+
+  const lesson = lessons.find((item) => item.id === lessonId);
+  if (lesson && !state.reviewedLessons.includes(lessonId)) {
+    state.reviewedLessons = [...state.reviewedLessons, lessonId];
+    const now = new Date();
+    state.activities = [{
+      type: 'lesson_reviewed',
+      title: lesson.title,
+      details: lesson.subject,
+      created_at: now.toISOString(),
+      date: now,
+    }, ...state.activities].slice(0, 30);
+  }
+  await refreshCertificates(true);
+  render();
+}
+
+async function markPdfLessonAsRead(lessonId) {
+  if (viewedPdfSyncRequests.has(lessonId) || state.reviewedLessons.includes(lessonId)) return;
+  viewedPdfSyncRequests.add(lessonId);
+  try {
+    const result = await apiCall(`/lessons/${lessonId}/viewed`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    if (!result) return;
+    state.reviewedLessons = [...state.reviewedLessons, lessonId];
+    const lesson = lessons.find((item) => item.id === lessonId);
+    if (lesson) {
+      const now = new Date();
+      state.activities = [{
+        type: 'lesson_reviewed',
+        title: lesson.title,
+        details: lesson.subject,
+        created_at: now.toISOString(),
+        date: now,
+      }, ...state.activities].slice(0, 30);
+    }
+    const status = document.querySelector(`[data-lesson-read-status="${lessonId}"]`);
+    if (status) {
+      status.textContent = 'Marked as read';
+      status.classList.add('is-read');
+    }
+    await refreshCertificates(true);
+    notify('Lesson marked as read.');
+  } finally {
+    viewedPdfSyncRequests.delete(lessonId);
+  }
+}
+
 async function restoreInitialSession() {
   initialSessionRequest = (async () => {
     const session = await apiCall('/auth/session');
@@ -221,15 +292,21 @@ async function loadBackendState() {
   const glyphs = ['⌁', '▦', '⌘', '✳'];
   subjects = data.subjects.map((subject, index) => ({
     ...subject,
+    id: Number(subject.id),
     color: tones[index % tones.length],
     icon: glyphs[index % glyphs.length],
   }));
   lessons = data.lessons.map((lesson) => ({
     ...lesson,
     id: Number(lesson.id),
+    topic_id: Number(lesson.topic_id),
     read: `${Math.max(1, Math.ceil(String(lesson.content || '').split(/\s+/).filter(Boolean).length / 200))} min read`,
   }));
-  quizzes = data.quizzes.map((quiz) => ({ ...quiz, id: Number(quiz.id) }));
+  quizzes = data.quizzes.map((quiz) => ({
+    ...quiz,
+    id: Number(quiz.id),
+    topic_id: Number(quiz.topic_id),
+  }));
   topics = data.topics.map((topic) => ({
     ...topic,
     id: Number(topic.id),
@@ -242,8 +319,8 @@ async function loadBackendState() {
   state.sets = data.sets.map((set) => ({ ...set, id: String(set.id), cards: set.cards || [] }));
   privateLibrary = data.user ? await apiCall('/my-library') || [] : [];
   state.schedules = data.schedules.map((item) => ({ ...item, id: String(item.id), time: item.time.slice(0, 5) }));
-  state.favorites = data.favorites;
-  state.reviewedLessons = data.reviewedLessons;
+  state.favorites = data.favorites.map(Number);
+  state.reviewedLessons = data.reviewedLessons.map(Number);
   state.attempts = data.attempts.map((attempt) => ({
     ...attempt,
     score: Number(attempt.score),
@@ -435,11 +512,12 @@ function subjectCard(subject) {
 function subjectDetail(id) {
   const subject = subjects.find((item) => item.id === Number(id));
   if (!subject) return shell(`${heading('SUBJECT', 'Subject not found', 'This subject may have been removed.') }<a href="#/subjects" class="button button-outline">← All subjects</a>`, 'Subject', 'subjects');
-  const subjectTopics = topics.filter((topic) => topic.subject_id === subject.id);
-  return shell(`${heading(escapeHtml(subject.name.toUpperCase()), escapeHtml(subject.name), escapeHtml(subject.description || 'Explore the topics, lessons, and practice available in this subject.'), '<a href="#/subjects" class="button button-outline">← All subjects</a>')}<div class="topic-list">${subjectTopics.map((topic) => {
-    const topicLessons = lessons.filter((lesson) => lesson.topic_id === topic.id);
-    const topicQuizzes = quizzes.filter((quiz) => quiz.topic_id === topic.id);
-    return `<section class="panel"><div class="section-title"><div><div class="eyebrow">${escapeHtml(subject.name)}</div><h2>${escapeHtml(topic.title)}</h2></div><span class="tag tag-mint">${topicLessons.length} lessons · ${topicQuizzes.length} quizzes</span></div>${topic.summary ? `<p>${escapeHtml(topic.summary)}</p>` : ''}<div class="lesson-list">${topicLessons.map(lessonCard).join('') || '<p class="empty-state">No lessons in this topic yet.</p>'}</div>${topicQuizzes.length ? `<div class="subject-quiz-links">${topicQuizzes.map((quiz) => `<a class="button button-outline button-small" href="#/quiz/${quiz.id}">${escapeHtml(quiz.title)} · ${quiz.questions} questions</a>`).join('')}</div>` : '<p class="empty-state">No quizzes in this topic yet.</p>'}</section>`;
+  const subjectTopics = topics.filter((topic) => Number(topic.subject_id) === subject.id);
+  return shell(`${heading(escapeHtml(subject.name.toUpperCase()), escapeHtml(subject.name), escapeHtml(subject.description || 'Explore the topics, lessons, and practice available in this subject.'), '<a href="#/subjects" class="button button-outline">← All subjects</a>')}<div class="topic-list">${subjectTopics.map((topic, index) => {
+    const topicLessons = lessons.filter((lesson) => Number(lesson.topic_id) === topic.id);
+    const topicQuizzes = quizzes.filter((quiz) => Number(quiz.topic_id) === topic.id);
+    const completedLessons = topicLessons.filter((lesson) => state.reviewedLessons.includes(lesson.id)).length;
+    return `<section class="panel topic-step"><div class="section-title"><div><div class="eyebrow">STEP ${index + 1} · ${escapeHtml(subject.name)}</div><h2>${escapeHtml(topic.title)}</h2></div><span class="tag tag-mint">${completedLessons}/${topicLessons.length} lessons · ${topicQuizzes.length} quizzes</span></div>${topic.summary ? `<p>${escapeHtml(topic.summary)}</p>` : ''}<div class="lesson-list">${topicLessons.map((lesson) => lessonCard(lesson, subject.id)).join('') || '<p class="empty-state">No lessons in this topic yet.</p>'}</div>${topicQuizzes.length ? `<div class="subject-quiz-links"><span class="eyebrow">PRACTICE THIS TOPIC</span>${topicQuizzes.map((quiz) => `<a class="button button-outline button-small" href="#/subject/${subject.id}/quiz/${quiz.id}">${escapeHtml(quiz.title)} · ${quiz.questions} questions</a>`).join('')}</div>` : '<p class="empty-state">No quizzes in this topic yet.</p>'}</section>`;
   }).join('') || '<p class="empty-state">No topics have been added for this subject yet.</p>'}</div>`, 'Subject topics', 'subjects');
 }
 
@@ -503,9 +581,10 @@ function lessonsPage() {
   return shell(`${heading('ONE IDEA AT A TIME', 'Lesson library', 'Explore bite-sized lessons made for curious minds.') }<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="lesson-search" type="search" placeholder="Search lessons..." /></label><select id="lesson-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><div class="lesson-list" id="lesson-list">${lessons.map(lessonCard).join('') || '<p class="empty-state">There are no lessons yet.</p>'}</div>`, 'Lessons', 'lessons');
 }
 
-function lessonCard(lesson) {
+function lessonCard(lesson, subjectId = null) {
   const favorite = state.favorites.includes(lesson.id);
-  return `<article class="panel lesson-card" data-title="${escapeHtml((lesson.title + ' ' + lesson.subject + ' ' + lesson.topic).toLowerCase())}" data-subject="${escapeHtml(lesson.subject)}"><span class="lesson-icon ${subjectColor(lesson.subject)}">${subjectIcon(lesson.subject)}</span><div class="lesson-copy"><div class="eyebrow">${escapeHtml(lesson.subject)} · ${escapeHtml(lesson.topic)}</div><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.read)} · A friendly, focused review.</p></div><button class="favorite-button ${favorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}" aria-label="${favorite ? 'Remove favorite' : 'Add favorite'}">${favorite ? '♥' : '♡'}</button><a href="#/lesson/${lesson.id}" class="button button-small button-outline">Read lesson →</a></article>`;
+  const lessonRoute = subjectId === null ? `lesson/${lesson.id}` : `subject/${subjectId}/lesson/${lesson.id}`;
+  return `<article class="panel lesson-card" data-title="${escapeHtml((lesson.title + ' ' + lesson.subject + ' ' + lesson.topic).toLowerCase())}" data-subject="${escapeHtml(lesson.subject)}"><span class="lesson-icon ${subjectColor(lesson.subject)}">${subjectIcon(lesson.subject)}</span><div class="lesson-copy"><div class="eyebrow">${escapeHtml(lesson.subject)} · ${escapeHtml(lesson.topic)}</div><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.read)} · A friendly, focused review.</p></div><button class="favorite-button ${favorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}" aria-label="${favorite ? 'Remove favorite' : 'Add favorite'}">${favorite ? '♥' : '♡'}</button><a href="#/${lessonRoute}" class="button button-small button-outline">Read lesson →</a></article>`;
 }
 
 function subjectColor(subject) {
@@ -520,15 +599,29 @@ function subjectIcon(subject) {
   return '⌘';
 }
 
-function lessonDetail(id) {
+function lessonDetail(id, subjectId = null) {
   const lesson = lessons.find((item) => item.id === Number(id));
-  if (!lesson) return shell(`${heading('LESSON REVIEWER', 'Lesson not found', 'This lesson may have been removed.') }<a href="#/lessons" class="button button-outline">← All lessons</a>`, 'Lesson reviewer', 'lessons');
+  const subject = subjectId === null ? null : subjects.find((item) => item.id === Number(subjectId));
+  const belongsToSubject = subject && topics.some((topic) => topic.id === Number(lesson?.topic_id) && topic.subject_id === subject.id);
+  if (!lesson || (subjectId !== null && (!subject || !belongsToSubject))) return shell(`${heading('LESSON REVIEWER', 'Lesson not found', 'This lesson may have been removed.') }<a href="#/lessons" class="button button-outline">← All lessons</a>`, 'Lesson reviewer', 'lessons');
   const isFavorite = state.favorites.includes(lesson.id);
+  const isRead = state.reviewedLessons.includes(lesson.id);
   const pdfUrl = `${apiBase}/api/lessons/${encodeURIComponent(lesson.id)}/pdf`;
+  const returnLink = subject
+    ? `<a href="#/subject/${subject.id}" class="button button-outline">← ${escapeHtml(subject.name)}</a>`
+    : '<a href="#/lessons" class="button button-outline">← All lessons</a>';
+  const practiceLink = subject
+    ? `<a href="#/subject/${subject.id}" class="text-link">Practice this subject →</a>`
+    : '<a href="#/quizzes" class="text-link">Try a practice quiz →</a>';
   const pdfResources = lesson.pdf_original_name
-    ? `<section class="panel lesson-resource"><div class="resource-icon">PDF</div><div class="resource-copy"><b>${escapeHtml(lesson.pdf_original_name)}</b><small>PDF learning material · available to view or download</small></div><div class="resource-actions"><a class="button button-outline button-small" href="${pdfUrl}" target="_blank" rel="noopener">View PDF ↗</a><a class="button button-primary button-small" href="${pdfUrl}?download=1">Download ↓</a></div></section>`
+    ? `<section class="panel lesson-resource"><div class="resource-icon">PDF</div><div class="resource-copy"><b>${escapeHtml(lesson.pdf_original_name)}</b><small>Open the PDF here to mark this lesson as read.</small></div><div class="resource-actions"><button class="button button-outline button-small" data-action="view-lesson-pdf" data-id="${lesson.id}" ${state.pdfLoadingLessonId === lesson.id ? 'disabled aria-busy="true"' : ''}>${state.pdfLoadingLessonId === lesson.id ? 'Loading…' : state.activePdfLessonId === lesson.id && state.activePdfUrl ? 'PDF open' : 'View PDF ↗'}</button><a class="button button-primary button-small" href="${pdfUrl}?download=1">Download ↓</a></div></section>${state.pdfErrorMessage && state.activePdfLessonId === lesson.id ? `<p class="pdf-error" role="alert">${escapeHtml(state.pdfErrorMessage)}</p>` : ''}${state.activePdfLessonId === lesson.id ? `<section class="panel lesson-pdf-panel">${state.activePdfUrl ? `<iframe class="lesson-pdf-viewer" data-id="${lesson.id}" src="${state.activePdfUrl}" title="Lesson PDF: ${escapeHtml(lesson.pdf_original_name)}"></iframe><button class="text-link close-pdf-button" data-action="close-lesson-pdf">Close PDF</button>` : state.pdfLoadingLessonId === lesson.id ? '<p class="empty-state">Loading your lesson PDF…</p>' : ''}</section>` : ''}`
     : '';
-  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, '<a href="#/lessons" class="button button-outline">← All lessons</a>')}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions"><button class="button button-primary" data-action="mark-reviewed" data-id="${lesson.id}">Mark as reviewed <span>✓</span></button><a href="#/quizzes" class="text-link">Try a practice quiz →</a></div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
+  const readStatus = isRead
+    ? 'Marked as read'
+    : lesson.pdf_original_name
+      ? 'View the attached PDF to mark this lesson as read.'
+      : 'This lesson is marked as read when opened.';
+  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, returnLink)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
 }
 
 function flashcardsPage() {
@@ -615,10 +708,14 @@ function quizCard(quiz) {
   return `<article class="panel quiz-card" data-title="${escapeHtml(`${quiz.title} ${quiz.topic}`.toLowerCase())}" data-subject="${escapeHtml(quiz.subject)}"><div class="quiz-card-top"><span class="quiz-badge ${subjectColor(quiz.subject)}">✳</span><span class="tag tag-mint">${quiz.questions} questions</span></div><div class="eyebrow">${escapeHtml(quiz.subject)}</div><h3>${escapeHtml(quiz.title)}</h3><p>${escapeHtml(quiz.topic)}</p><div class="quiz-meta"><span>▤ ${quiz.questions} questions</span><span>◷ ${quiz.time} mins</span></div><a href="#/quiz/${quiz.id}" class="button button-primary button-full">Start a practice quiz →</a></article>`;
 }
 
-function quizStart(id) {
+function quizStart(id, subjectId = null) {
   const quiz = quizzes.find((item) => item.id === Number(id));
-  if (!quiz) return shell(`${heading('PRACTICE QUIZ', 'Quiz not found', 'This quiz may have been removed.') }<a href="#/quizzes" class="button button-outline">← Back to quizzes</a>`, 'Practice quiz', 'quizzes');
-  return shell(`${heading('JUST YOU AND THE NEXT QUESTION', escapeHtml(quiz.title), `${quiz.questions} questions · ${quiz.time} minutes`, '<a href="#/quizzes" class="button button-outline">← Back to quizzes</a>')}<div class="quiz-start-wrap"><div class="panel quiz-ready"><span class="ready-mark">✳</span><div class="eyebrow">A PRACTICE MOMENT</div><h2>Ready when you are.</h2><p>This is a relaxed practice. Take a breath, read each question, and choose what feels right. You’ll see helpful explanations at the end.</p><div class="ready-stats"><span><b>${quiz.questions}</b> questions</span><span><b>${quiz.time}</b> minutes available</span></div>${quiz.questions ? `<button class="button button-primary" data-action="start-quiz" data-id="${quiz.id}">Begin quiz <span>→</span></button>` : '<p class="empty-state">This quiz has no questions yet.</p>'}</div></div>`, 'Practice quiz', 'quizzes');
+  const subject = subjectId === null ? null : subjects.find((item) => item.id === Number(subjectId));
+  const belongsToSubject = subject && topics.some((topic) => topic.id === Number(quiz?.topic_id) && topic.subject_id === subject.id);
+  const returnRoute = subject ? `subject/${subject.id}` : 'quizzes';
+  const backLink = `<a href="#/${returnRoute}" class="button button-outline">← Back to ${subject ? escapeHtml(subject.name) : 'quizzes'}</a>`;
+  if (!quiz || (subjectId !== null && (!subject || !belongsToSubject))) return shell(`${heading('PRACTICE QUIZ', 'Quiz not found', 'This quiz is not part of the selected subject.')}${backLink}`, 'Practice quiz', 'quizzes');
+  return shell(`${heading('JUST YOU AND THE NEXT QUESTION', escapeHtml(quiz.title), `${quiz.questions} questions · ${quiz.time} minutes`, backLink)}<div class="quiz-start-wrap"><div class="panel quiz-ready"><span class="ready-mark">✳</span><div class="eyebrow">A PRACTICE MOMENT</div><h2>Ready when you are.</h2><p>This is a relaxed practice. Take a breath, read each question, and choose what feels right. You’ll see helpful explanations at the end.</p><div class="ready-stats"><span><b>${quiz.questions}</b> questions</span><span><b>${quiz.time}</b> minutes available</span></div>${quiz.questions ? `<button class="button button-primary" data-action="start-quiz" data-id="${quiz.id}" data-return-route="${returnRoute}">Begin quiz <span>→</span></button>` : '<p class="empty-state">This quiz has no questions yet.</p>'}</div></div>`, 'Practice quiz', 'quizzes');
 }
 
 function activeQuiz() {
@@ -640,7 +737,11 @@ function quizResult() {
   const total = result?.total_questions ?? quizQuestions.length;
   const correct = result?.score ?? review.filter((item) => item.correct).length;
   const pct = result?.percentage ?? Math.round((correct / total) * 100);
-  return shell(`${heading('PRACTICE COMPLETE', 'Look at you go.', 'Every answer is a chance to learn something new.') }<div class="result-summary panel"><span class="result-illustration">${pct >= 60 ? '✳' : '♡'}</span><div class="eyebrow">YOUR PRACTICE RESULT</div><div class="big-score">${pct}<small>%</small></div><p>You got <b>${correct} of ${total}</b> questions right. ${pct >= 60 ? 'That’s something to feel good about.' : 'Every practice makes the next one a little easier.'}</p><div class="score-breakdown"><span><b>${correct}</b> Correct</span><span><b>${total - correct}</b> To revisit</span><span><b>${total}</b> Total questions</span></div><a href="#/quizzes" class="button button-primary">Choose another quiz →</a></div><section class="panel review-panel"><div class="section-title"><div><div class="eyebrow">A LITTLE REVIEW</div><h2>Answers & explanations</h2></div></div>${review.map((item) => `<div class="review-answer ${item.correct ? 'correct' : 'incorrect'}"><div class="review-label">${item.correct ? '✓ YOU GOT IT' : '↗ GOOD ONE TO REVISIT'}</div><h3>${escapeHtml(item.question)}</h3>${item.selected !== undefined ? `<p>Your answer: ${escapeHtml(item.type === 'identification' ? item.selected : item.options[item.selected] || 'Not answered')}</p>` : ''}<p><b>Answer: ${escapeHtml(item.type === 'identification' ? item.correct_option : item.options[item.answer] ?? item.correct_option)}</b></p><p>${escapeHtml(item.explanation)}</p></div>`).join('')}</section>`, 'Quiz results', 'quizzes');
+  const returnRoute = q?.returnRoute || 'quizzes';
+  const returnSubject = returnRoute.startsWith('subject/')
+    ? subjects.find((subject) => subject.id === Number(returnRoute.split('/')[1]))?.name
+    : null;
+  return shell(`${heading('PRACTICE COMPLETE', 'Look at you go.', 'Every answer is a chance to learn something new.') }<div class="result-summary panel"><span class="result-illustration">${pct >= 60 ? '✳' : '♡'}</span><div class="eyebrow">YOUR PRACTICE RESULT</div><div class="big-score">${pct}<small>%</small></div><p>You got <b>${correct} of ${total}</b> questions right. ${pct >= 60 ? 'That’s something to feel good about.' : 'Every practice makes the next one a little easier.'}</p><div class="score-breakdown"><span><b>${correct}</b> Correct</span><span><b>${total - correct}</b> To revisit</span><span><b>${total}</b> Total questions</span></div><a href="#/${returnRoute}" class="button button-primary">Back to ${escapeHtml(returnSubject || 'quizzes')} →</a></div><section class="panel review-panel"><div class="section-title"><div><div class="eyebrow">A LITTLE REVIEW</div><h2>Answers & explanations</h2></div></div>${review.map((item) => `<div class="review-answer ${item.correct ? 'correct' : 'incorrect'}"><div class="review-label">${item.correct ? '✓ YOU GOT IT' : '↗ GOOD ONE TO REVISIT'}</div><h3>${escapeHtml(item.question)}</h3>${item.selected !== undefined ? `<p>Your answer: ${escapeHtml(item.type === 'identification' ? item.selected : item.options[item.selected] || 'Not answered')}</p>` : ''}<p><b>Answer: ${escapeHtml(item.type === 'identification' ? item.correct_option : item.options[item.answer] ?? item.correct_option)}</b></p><p>${escapeHtml(item.explanation)}</p></div>`).join('')}</section>`, 'Quiz results', 'quizzes');
 }
 
 function historyPage() {
@@ -806,8 +907,8 @@ function certificatesPage() {
     </div>
     <a class="button button-primary" href="${apiBase}/api/certificates/${encodeURIComponent(certificate.id)}/download">Download certificate ↓</a>
   </article>`).join('');
-  return shell(`${heading('YOUR ACHIEVEMENTS', 'My certificates', 'Certificates are awarded after you review every lesson and score at least 70% on each quiz in a teacher’s subject.', '<a href="#/profile" class="button button-outline">← Profile settings</a>')}
-    <div class="certificate-list">${cards || '<section class="panel empty-panel"><span>✳</span><h2>No certificates yet</h2><p>Finish every lesson and pass each quiz with at least 70% in a teacher-created subject. Your certificate will appear here automatically.</p><a class="button button-outline" href="#/subjects">Browse subjects →</a></section>'}</div>`,
+  return shell(`${heading('YOUR ACHIEVEMENTS', 'My certificates', 'Read every lesson in a teacher’s subject and, if it has quizzes, score at least 70% on each one.', '<a href="#/profile" class="button button-outline">← Profile settings</a>')}
+    <div class="certificate-list">${cards || '<section class="panel empty-panel"><span>✳</span><h2>No certificates yet</h2><p>Read every lesson in a teacher-created subject and pass each available quiz with at least 70%. Your certificate will appear here automatically.</p><a class="button button-outline" href="#/subjects">Browse subjects →</a></section>'}</div>`,
   'My certificates', 'profile');
 }
 
@@ -818,6 +919,14 @@ function loginPage(register = false) {
 function emailVerificationPage() {
   const email = sessionStorage.getItem('studynest_pending_email') || '';
   return `<main class="auth-screen"><section class="auth-story"><a class="brand brand-light" href="#/login"><span class="brand-mark">s</span><span><b>StudyNest</b><small>email verification</small></span></a><div class="story-content"><div class="eyebrow">ONE QUICK CHECK</div><h1>Verify your email to get started.</h1><p>Enter the six-digit code we sent to your inbox.</p><div class="story-doodle">✳</div></div></section><section class="auth-form-side"><form class="auth-form" id="verify-email-form"><div class="eyebrow">CHECK YOUR INBOX</div><h2>Enter your verification code</h2><p>We sent a time-limited code to <b>${escapeHtml(email || 'your email address')}</b>.</p><input type="hidden" name="email" value="${escapeHtml(email)}" /><label>Six-digit code<input name="code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" /></label><button type="submit" class="button button-primary button-full">Verify email →</button><button type="button" class="button button-outline button-full" data-action="resend-otp" data-email="${escapeHtml(email)}">Send a new code</button><div class="auth-switch"><a href="#/login">← Back to sign in</a></div></form></section></main>`;
+}
+
+function renderLessonPage(lessonId, subjectId = null) {
+  app.innerHTML = lessonDetail(lessonId, subjectId);
+  const lesson = lessons.find((item) => item.id === lessonId);
+  if (state.user.role === 'user' && lesson && !lesson.pdf_original_name && !state.reviewedLessons.includes(lessonId)) {
+    markLessonAsRead(lessonId);
+  }
 }
 
 function render() {
@@ -839,14 +948,25 @@ function render() {
     authRoot.unmount();
     authRoot = null;
   }
-  if (current.startsWith('lesson/')) {
-    const lessonId = Number(current.split('/')[1]);
+  const currentParts = current.split('/');
+  const subjectLessonRoute = currentParts[0] === 'subject' && currentParts[2] === 'lesson';
+  const lessonRoute = current.startsWith('lesson/') || subjectLessonRoute;
+  if (lessonRoute) {
+    const lessonId = Number(subjectLessonRoute ? currentParts[3] : currentParts[1]);
     if (state.activeLessonId !== lessonId) {
+      releaseLessonPdf();
       state.activeLessonId = lessonId;
       state.lessonStartedAt = Date.now();
+      state.activePdfLessonId = null;
+      state.pdfLoadingLessonId = null;
+      state.pdfErrorMessage = '';
     }
   } else {
+    releaseLessonPdf();
     state.activeLessonId = null;
+    state.activePdfLessonId = null;
+    state.pdfLoadingLessonId = null;
+    state.pdfErrorMessage = '';
     state.lessonStartedAt = 0;
   }
   const isManagementRoute = current === 'manage-content' || current.startsWith('manage-');
@@ -866,9 +986,15 @@ function render() {
   else if (current === 'activities') app.innerHTML = activitiesPage();
   else if (current === 'notifications') app.innerHTML = notificationsPage();
   else if (current === 'subjects') app.innerHTML = subjectsPage();
-  else if (current.startsWith('subject/')) app.innerHTML = subjectDetail(current.split('/')[1]);
+  else if (current.startsWith('subject/')) {
+    const [, subjectId, nestedRoute, nestedId] = current.split('/');
+    if (nestedRoute === 'lesson') renderLessonPage(Number(nestedId), subjectId);
+    else app.innerHTML = nestedRoute === 'quiz'
+      ? quizStart(nestedId, subjectId)
+      : subjectDetail(subjectId);
+  }
   else if (current === 'lessons') app.innerHTML = lessonsPage();
-  else if (current.startsWith('lesson/')) app.innerHTML = lessonDetail(current.split('/')[1]);
+  else if (current.startsWith('lesson/')) renderLessonPage(Number(currentParts[1]));
   else if (current === 'flashcards') app.innerHTML = flashcardsPage();
   else if (current === 'my-library') app.innerHTML = privateLibraryPage();
   else if (current === 'flashcards/create') app.innerHTML = flashcardForm('');
@@ -1070,7 +1196,7 @@ app.addEventListener('submit', async (event) => {
     }
     const endpoint = kind === 'quizzes' ? '/manage/quizzes' : `/manage/${kind}`;
     const result = await apiCall(`${endpoint}${id ? `/${encodeURIComponent(id)}` : ''}`, {
-      method: id ? 'PUT' : 'POST',
+      method: id && kind !== 'lessons' ? 'PUT' : 'POST',
       body: requestBody,
     });
     if (!result) return;
@@ -1360,37 +1486,50 @@ app.addEventListener('click', async (event) => {
     save('favorites', favorites);
     render();
     notify(result.saved ? 'Lesson saved to your favorites.' : 'Lesson removed from your favorites.');
-  } else if (action === 'mark-reviewed') {
+  } else if (action === 'view-lesson-pdf') {
     const lessonId = Number(id);
-    const duration = state.lessonStartedAt ? Math.min(7200, Math.floor((Date.now() - state.lessonStartedAt) / 1000)) : 0;
-    const result = await apiCall(`/lessons/${lessonId}/review`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-      headers: { 'X-Study-Duration': String(duration) },
-    });
-    if (!result) return;
-    const lesson = lessons.find((item) => item.id === lessonId);
-    if (lesson && !state.reviewedLessons.includes(lessonId)) {
-      state.reviewedLessons = [...state.reviewedLessons, lessonId];
-    }
-    const now = new Date();
-    state.studyTimeSeconds += duration;
-    const studyDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const todayStudy = state.weeklyStudy.find((day) => day.study_date === studyDate);
-    if (todayStudy) todayStudy.duration_seconds = Number(todayStudy.duration_seconds) + duration;
-    else state.weeklyStudy = [...state.weeklyStudy, { study_date: studyDate, duration_seconds: duration }];
-    if (lesson) {
-      state.activities = [{
-        type: 'lesson_reviewed',
-        title: lesson.title,
-        details: lesson.subject,
-        created_at: now.toISOString(),
-        date: now,
-      }, ...state.activities].slice(0, 30);
-    }
+    releaseLessonPdf();
+    state.activePdfLessonId = lessonId;
+    state.pdfLoadingLessonId = lessonId;
+    state.pdfErrorMessage = '';
     render();
-    notify('Lovely work. Your lesson is marked as reviewed.');
-    await refreshCertificates(true);
+    try {
+      const response = await fetch(`${apiBase}/api/lessons/${encodeURIComponent(lessonId)}/pdf`, {
+        credentials: 'include',
+        headers: { Accept: 'application/pdf' },
+      });
+      if (!response.ok) {
+        let message = `Unable to open this PDF (${response.status}).`;
+        try {
+          const payload = await response.json();
+          if (payload.error) message = payload.error;
+        } catch {
+          // Keep the HTTP status message when the server does not return JSON.
+        }
+        throw new Error(message);
+      }
+      const pdf = await response.blob();
+      if (await pdf.slice(0, 5).text() !== '%PDF-') {
+        throw new Error('The server response is not a valid PDF. Please upload the lesson PDF again or contact your administrator.');
+      }
+      if (state.activePdfLessonId !== lessonId) return;
+      state.activePdfUrl = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+    } catch (error) {
+      if (state.activePdfLessonId === lessonId) {
+        state.pdfErrorMessage = error instanceof Error
+          ? error.message
+          : 'Unable to open this PDF. Check your connection and try again.';
+      }
+    } finally {
+      if (state.pdfLoadingLessonId === lessonId) state.pdfLoadingLessonId = null;
+      if (state.activeLessonId === lessonId) render();
+    }
+  } else if (action === 'close-lesson-pdf') {
+    releaseLessonPdf();
+    state.activePdfLessonId = null;
+    state.pdfLoadingLessonId = null;
+    state.pdfErrorMessage = '';
+    render();
   } else if (action === 'delete-set') {
     if (window.confirm('Delete this study set and all its cards?')) {
       const result = await apiCall(`/study-sets/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -1455,7 +1594,16 @@ app.addEventListener('click', async (event) => {
       return;
     }
     quizQuestions = quiz.questions;
-    quizSession = { quizId, isPrivate, title: quiz.title, subject: quiz.subject, index: 0, answers: {}, startedAt: Date.now() };
+    quizSession = {
+      quizId,
+      isPrivate,
+      title: quiz.title,
+      subject: quiz.subject,
+      returnRoute: isPrivate ? 'my-library' : button.dataset.returnRoute || 'quizzes',
+      index: 0,
+      answers: {},
+      startedAt: Date.now(),
+    };
     go('active-quiz');
   } else if (action === 'answer') {
     if (quizSession) quizSession.answers[quizSession.index] = Number(button.dataset.index);
@@ -1470,7 +1618,7 @@ app.addEventListener('click', async (event) => {
     if (quizSession) quizSession.index = Number(button.dataset.index);
     render();
   } else if (action === 'exit-quiz') {
-    const returnRoute = quizSession?.isPrivate ? 'my-library' : 'quizzes';
+    const returnRoute = quizSession?.returnRoute || (quizSession?.isPrivate ? 'my-library' : 'quizzes');
     quizSession = null;
     go(returnRoute);
   } else if (action === 'submit-quiz') {
@@ -1518,6 +1666,12 @@ app.addEventListener('click', async (event) => {
     go('quiz-results');
   }
 });
+
+app.addEventListener('load', (event) => {
+  const frame = event.target;
+  if (!(frame instanceof HTMLIFrameElement) || !frame.matches('.lesson-pdf-viewer')) return;
+  markPdfLessonAsRead(Number(frame.dataset.id));
+}, true);
 
 window.addEventListener('hashchange', () => {
   document.querySelector('.modal-backdrop')?.remove();
