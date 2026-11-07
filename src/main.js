@@ -82,7 +82,7 @@ function showLoadingIndicator() {
     loadingIndicator.className = 'loading-overlay';
     loadingIndicator.setAttribute('role', 'status');
     loadingIndicator.setAttribute('aria-live', 'polite');
-    loadingIndicator.innerHTML = '<div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><b>One moment</b><small>Loading your StudyNest content…</small></div>';
+    loadingIndicator.innerHTML = '<div class="loading-card"><div class="loading-brand"><span class="loading-brand-mark">s</span><span><b>StudyNest</b><small>YOUR LEARNING SPACE</small></span></div><div class="loading-orbit" aria-hidden="true"><span></span><i></i><b></b></div><strong>Getting things ready</strong><p>We’re loading your learning space.</p><div class="loading-progress" aria-hidden="true"><span></span></div></div>';
     document.body.append(loadingIndicator);
   }
   loadingIndicator.classList.add('is-visible');
@@ -91,7 +91,7 @@ function showLoadingIndicator() {
 function beginLoading() {
   pendingLoadingActions += 1;
   if (pendingLoadingActions === 1) {
-    loadingTimer = setTimeout(showLoadingIndicator, 180);
+    loadingTimer = setTimeout(showLoadingIndicator, 100);
   }
   let finished = false;
   return () => {
@@ -224,6 +224,7 @@ function releaseLessonPdf() {
 }
 
 async function apiCall(path, options = {}) {
+  const finishLoading = beginLoading();
   try {
     if ((options.method || 'GET').toUpperCase() !== 'GET' && initialSessionRequest) {
       await initialSessionRequest;
@@ -238,6 +239,8 @@ async function apiCall(path, options = {}) {
     }
     notify(error instanceof Error ? error.message : 'StudyNest could not complete that request.');
     return null;
+  } finally {
+    finishLoading();
   }
 }
 
