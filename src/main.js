@@ -42,6 +42,9 @@ const viewedPdfSyncRequests = new Set();
 let quizSession = null;
 let flashcardSession = null;
 let toastTimer;
+let loadingTimer = null;
+let pendingLoadingActions = 0;
+let loadingIndicator = null;
 const app = document.querySelector('#app');
 let authRoot = null;
 let initialSessionRequest = null;
@@ -71,6 +74,44 @@ function notify(message) {
   toast.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+function showLoadingIndicator() {
+  if (!loadingIndicator) {
+    loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'loading-overlay';
+    loadingIndicator.setAttribute('role', 'status');
+    loadingIndicator.setAttribute('aria-live', 'polite');
+    loadingIndicator.innerHTML = '<div class="loading-card"><span class="loading-spinner" aria-hidden="true"></span><b>One moment</b><small>Loading your StudyNest content…</small></div>';
+    document.body.append(loadingIndicator);
+  }
+  loadingIndicator.classList.add('is-visible');
+}
+
+function beginLoading() {
+  pendingLoadingActions += 1;
+  if (pendingLoadingActions === 1) {
+    loadingTimer = setTimeout(showLoadingIndicator, 180);
+  }
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    pendingLoadingActions = Math.max(0, pendingLoadingActions - 1);
+    if (pendingLoadingActions) return;
+    clearTimeout(loadingTimer);
+    loadingTimer = null;
+    loadingIndicator?.classList.remove('is-visible');
+  };
+}
+
+async function withLoading(task) {
+  const finishLoading = beginLoading();
+  try {
+    return await task();
+  } finally {
+    finishLoading();
+  }
 }
 
 function downloadCsv(filename, rows) {
@@ -935,12 +976,12 @@ function render() {
     if (!authRoot) authRoot = createRoot(app);
     authRoot.render(createElement(AuthApp, {
       route: current,
-      onAuthenticate: authenticate,
-      onGoogleAuthenticate: authenticateWithGoogle,
-      onVerify: verifyEmail,
-      onResend: resendOtp,
-      onForgotRequest: requestPasswordReset,
-      onPasswordReset: resetPassword,
+      onAuthenticate: (...args) => withLoading(() => authenticate(...args)),
+      onGoogleAuthenticate: (...args) => withLoading(() => authenticateWithGoogle(...args)),
+      onVerify: (...args) => withLoading(() => verifyEmail(...args)),
+      onResend: (...args) => withLoading(() => resendOtp(...args)),
+      onForgotRequest: (...args) => withLoading(() => requestPasswordReset(...args)),
+      onPasswordReset: (...args) => withLoading(() => resetPassword(...args)),
     }));
     return;
   }
@@ -1130,6 +1171,8 @@ app.addEventListener('submit', async (event) => {
   const form = event.target;
   if (form.id === 'auth-form' || form.id === 'verify-email-form') return;
   if (!form.reportValidity()) return;
+  const finishLoading = beginLoading();
+  try {
   if (form.id === 'teacher-id-resubmit-form') {
     const result = await apiCall('/auth/teacher-id-photo', {
       method: 'POST',
@@ -1297,6 +1340,9 @@ app.addEventListener('submit', async (event) => {
     render();
     notify('Your profile has been saved.');
   }
+  } finally {
+    finishLoading();
+  }
 });
 
 app.addEventListener('input', (event) => {
@@ -1394,6 +1440,8 @@ app.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const { action, id } = button.dataset;
+  const finishLoading = beginLoading();
+  try {
   if (action === 'download-report') {
     downloadReport(button.dataset.report, button.dataset.kind || '');
   } else if (action === 'resend-otp') {
@@ -1664,6 +1712,9 @@ app.addEventListener('click', async (event) => {
     save('attempts', [attempt, ...state.attempts]);
     await refreshCertificates(true);
     go('quiz-results');
+  }
+  } finally {
+    finishLoading();
   }
 });
 
