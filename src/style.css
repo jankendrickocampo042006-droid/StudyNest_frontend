@@ -697,6 +697,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .private-ai-generator h3, .private-ai-generator p { margin: 0; }
 .private-ai-generator h3 { color: #432b31; font-size: 15px; }
 .private-ai-generator p { color: #78847b; font-size: 11px; line-height: 1.6; }
+.private-ai-quota { padding: 10px 12px; border: 1px solid #dfe9df; border-radius: 8px; background: #f2f7f1; color: #3d6650; font-size: 11px; font-weight: 700; line-height: 1.5; }
+.private-ai-quota.is-limit-reached { border-color: #f0d7d4; background: #fff6f4; color: #9a403b; }
 .private-ai-generator .form-grid { margin: 0; }
 .private-ai-generator .check-row { margin: 0; align-items: flex-start; }
 .certificate-list { display: grid; gap: 12px; }
