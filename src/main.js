@@ -20,6 +20,7 @@ let state = {
   sets: [],
   schedules: [],
   favorites: [],
+  favoriteSubjects: [],
   reviewedLessons: [],
   attempts: [],
   activities: [],
@@ -451,6 +452,7 @@ async function loadBackendState() {
   privateLibrary = data.user ? await apiCall('/my-library') || [] : [];
   state.schedules = data.schedules.map((item) => ({ ...item, id: String(item.id), time: item.time.slice(0, 5) }));
   state.favorites = data.favorites.map(Number);
+  state.favoriteSubjects = (data.favoriteSubjects || []).map(Number);
   state.reviewedLessons = data.reviewedLessons.map(Number);
   state.attempts = data.attempts.map((attempt) => ({
     ...attempt,
@@ -650,14 +652,18 @@ function metric(label, value, detail, tone = 'mint', iconText = '↗') {
 }
 
 function subjectCard(subject) {
-  return `<article class="subject-card ${subject.color}"><div class="subject-top"><span class="subject-icon">${subject.icon}</span><span class="subject-count">${subject.lessons} lessons</span></div><div class="subject-code">${escapeHtml(subject.short)} · ${subject.quizzes} quizzes</div><h3>${escapeHtml(subject.name)}</h3><p>${escapeHtml(subject.description || '')}</p><div class="progress-line"><span style="width:${subject.progress}%"></span></div><div class="progress-meta"><span>${subject.progress}% complete</span><a href="#/subject/${subject.id}">Explore topics <b>→</b></a></div></article>`;
+  const isFavorite = state.favoriteSubjects.includes(subject.id);
+  return `<article class="subject-card ${subject.color}"><div class="subject-top"><span class="subject-icon">${subject.icon}</span><div class="subject-card-actions"><span class="subject-count">${subject.lessons} lessons</span><button class="subject-favorite-button ${isFavorite ? 'is-favorite' : ''}" data-action="favorite-subject" data-id="${subject.id}" aria-label="${isFavorite ? 'Remove subject from favorites' : 'Add subject to favorites'}" title="${isFavorite ? 'Remove from favorites' : 'Add to favorites'}">${isFavorite ? '♥' : '♡'}</button></div></div><div class="subject-code">${escapeHtml(subject.short)} · ${subject.quizzes} quizzes</div><h3>${escapeHtml(subject.name)}</h3><p>${escapeHtml(subject.description || '')}</p><div class="progress-line"><span style="width:${subject.progress}%"></span></div><div class="progress-meta"><span>${subject.progress}% complete</span><a href="#/subject/${subject.id}">Explore topics <b>→</b></a></div></article>`;
 }
 
 function subjectDetail(id) {
   const subject = subjects.find((item) => item.id === Number(id));
   if (!subject) return shell(`${heading('SUBJECT', 'Subject not found', 'This subject may have been removed.') }<a href="#/subjects" class="button button-outline">← All subjects</a>`, 'Subject', 'subjects');
   const subjectTopics = topics.filter((topic) => Number(topic.subject_id) === subject.id);
-  return shell(`${heading(escapeHtml(subject.name.toUpperCase()), escapeHtml(subject.name), escapeHtml(subject.description || 'Explore the topics, lessons, and practice available in this subject.'), '<a href="#/subjects" class="button button-outline">← All subjects</a>')}<div class="topic-list">${subjectTopics.map((topic, index) => {
+  const certificateInfo = subject.certificate_enabled
+    ? `<div class="soft-banner"><span>✳</span><div><b>Certificate available</b><small>Complete at least ${subject.required_completion_percent}% of this subject’s lessons${subject.quizzes ? ` and score at least ${subject.minimum_quiz_score}% on each quiz` : ''} to earn it.</small></div></div>`
+    : '<div class="soft-banner"><span>♡</span><div><b>No certificate for this subject</b><small>The subject owner has not enabled completion certificates.</small></div></div>';
+  return shell(`${heading(escapeHtml(subject.name.toUpperCase()), escapeHtml(subject.name), escapeHtml(subject.description || 'Explore the topics, lessons, and practice available in this subject.'), '<a href="#/subjects" class="button button-outline">← All subjects</a>')}${certificateInfo}<div class="topic-list">${subjectTopics.map((topic, index) => {
     const topicLessons = lessons.filter((lesson) => Number(lesson.topic_id) === topic.id);
     const topicQuizzes = quizzes.filter((quiz) => Number(quiz.topic_id) === topic.id);
     const completedLessons = topicLessons.filter((lesson) => state.reviewedLessons.includes(lesson.id)).length;
@@ -905,7 +911,9 @@ function historyPage() {
 
 function favoritesPage() {
   const favoriteLessons = lessons.filter((lesson) => state.favorites.includes(lesson.id));
-  return shell(`${heading('THE THINGS YOU WANT TO REMEMBER', 'Favorite lessons', 'Your saved lessons, all in one cozy place.') }${favoriteLessons.length ? `<div class="lesson-list">${favoriteLessons.map(lessonCard).join('')}</div>` : '<div class="panel empty-panel"><span>♡</span><h2>No favorites just yet</h2><p>Save a lesson you love and it’ll be right here when you need it.</p><a class="button button-primary" href="#/lessons">Browse lessons →</a></div>'}`, 'Favorites', 'favorites');
+  const favoriteSubjects = subjects.filter((subject) => state.favoriteSubjects.includes(subject.id));
+  const sections = `${favoriteSubjects.length ? `<section class="favorites-section"><div class="section-title"><div><div class="eyebrow">YOUR SUBJECTS</div><h2>Saved subjects</h2></div></div><div class="subject-grid">${favoriteSubjects.map(subjectCard).join('')}</div></section>` : ''}${favoriteLessons.length ? `<section class="favorites-section"><div class="section-title"><div><div class="eyebrow">YOUR LESSONS</div><h2>Saved lessons</h2></div></div><div class="lesson-list">${favoriteLessons.map(lessonCard).join('')}</div></section>` : ''}`;
+  return shell(`${heading('THE THINGS YOU WANT TO REMEMBER', 'Favorites', 'Your saved subjects and lessons, all in one place.') }${sections || '<div class="panel empty-panel"><span>♡</span><h2>No favorites just yet</h2><p>Save a subject or lesson and it’ll be right here when you need it.</p><a class="button button-primary" href="#/subjects">Browse subjects →</a></div>'}`, 'Favorites', 'favorites');
 }
 
 function schedulePage() {
@@ -936,6 +944,10 @@ function managementPage() {
     ['Lessons', management.lessons.length, 'Student resources', 'sky'],
     ['Quizzes', management.quizzes.length, `${questionCount} questions`, 'peach'],
   ];
+
+  if (section.startsWith('subject/')) {
+    return managementSubjectDetail(Number(section.split('/')[1]));
+  }
 
   if (section === 'content' || section === 'overview') {
     return shell(`${heading('WORKSPACE OVERVIEW', 'Welcome to your content studio', 'Manage your learning catalog from one clear, organized workspace.') }
@@ -993,10 +1005,12 @@ function managementPage() {
     const name = entry.name || entry.title;
     const subtitle = kind === 'lessons' && entry.pdf_original_name
       ? `${detail(entry)} · PDF attached: ${entry.pdf_original_name}`
-      : detail(entry);
+      : kind === 'subjects'
+        ? `${detail(entry)} · ${Number(entry.certificate_enabled) === 1 || entry.certificate_enabled === true ? 'Certificates enabled' : 'Certificates disabled'}`
+        : detail(entry);
     return `<article class="admin-record-row" data-admin-search="${escapeHtml(`${name} ${subtitle}`.toLowerCase())}">
       <span class="admin-record-icon">${icon(kind === 'quizzes' ? 'quiz' : kind === 'topics' ? 'cards' : 'book')}</span>
-      <div class="admin-content-copy"><b>${escapeHtml(name)}</b><small>${escapeHtml(subtitle)}</small></div>
+      ${kind === 'subjects' ? `<a class="admin-content-copy admin-subject-link" href="#/manage-subject/${entry.id}"><b>${escapeHtml(name)}</b><small>${escapeHtml(subtitle)} · Open subject details →</small></a>` : `<div class="admin-content-copy"><b>${escapeHtml(name)}</b><small>${escapeHtml(subtitle)}</small></div>`}
       <div class="admin-content-actions"><button class="quiet-button" data-action="edit-content" data-kind="${kind}" data-id="${entry.id}">Edit</button><button class="quiet-button danger-text" data-action="delete-content" data-kind="${kind}" data-id="${entry.id}" data-title="${escapeHtml(name)}">Delete</button></div>
     </article>`;
   }).join('') || `<div class="admin-empty"><p>No ${kind} yet. Add your first ${singular} to start building the student catalog.</p><button class="button button-outline button-small" data-action="new-content" data-kind="${kind}">＋ Create ${singular}</button></div>`;
@@ -1004,6 +1018,31 @@ function managementPage() {
   return shell(`${heading('LEARNING CATALOG', title, description, headingAction)}
     <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>All ${kind}</b><small>${entries.length} ${entries.length === 1 ? singular : kind} in your catalog</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search ${kind}" placeholder="Search ${kind}..." /></label></div><div class="admin-record-list">${rows}</div></section>`,
   title, `manage-${section}`);
+}
+
+function managementSubjectDetail(subjectId) {
+  const subject = management.subjects.find((item) => Number(item.id) === subjectId);
+  if (!subject) {
+    return shell(`${heading('LEARNING CATALOG', 'Subject not found', 'This subject may have been removed.', '<a href="#/manage-subjects" class="button button-outline">← All subjects</a>')}`, 'Subject', 'manage-subjects');
+  }
+  const subjectTopics = management.topics.filter((topic) => Number(topic.subject_id) === subjectId);
+  const topicSections = subjectTopics.map((topic, index) => {
+    const topicLessons = management.lessons.filter((lesson) => Number(lesson.topic_id) === Number(topic.id));
+    const topicQuizzes = management.quizzes.filter((quiz) => Number(quiz.topic_id) === Number(topic.id));
+    const contentRows = (items, kind, glyph) => items.map((item) => `<article class="admin-record-row">
+      <span class="admin-record-icon">${icon(glyph)}</span><div class="admin-content-copy"><b>${escapeHtml(item.title)}</b><small>${kind === 'lessons' && item.pdf_original_name ? `PDF: ${escapeHtml(item.pdf_original_name)}` : kind === 'quizzes' ? `${item.time} min · ${item.questions.length} questions` : 'Lesson'}</small></div>
+      <div class="admin-content-actions"><button class="quiet-button" data-action="edit-content" data-kind="${kind}" data-id="${item.id}">Edit</button><button class="quiet-button danger-text" data-action="delete-content" data-kind="${kind}" data-id="${item.id}" data-title="${escapeHtml(item.title)}">Delete</button></div>
+    </article>`).join('');
+    return `<section class="panel admin-section-panel subject-management-topic"><div class="section-title"><div><div class="eyebrow">TOPIC ${index + 1}</div><h2>${escapeHtml(topic.title)}</h2>${topic.summary ? `<p>${escapeHtml(topic.summary)}</p>` : ''}</div><div class="admin-content-actions"><button class="quiet-button" data-action="edit-content" data-kind="topics" data-id="${topic.id}">Edit topic</button><button class="quiet-button danger-text" data-action="delete-content" data-kind="topics" data-id="${topic.id}" data-title="${escapeHtml(topic.title)}">Delete</button></div></div>
+      <div class="section-title"><h3>Lessons <small>${topicLessons.length}</small></h3><button class="button button-outline button-small" data-action="new-content" data-kind="lessons" data-topic-id="${topic.id}">＋ Add lesson</button></div><div class="admin-record-list">${contentRows(topicLessons, 'lessons', 'book') || '<p class="empty-state">No lessons in this topic yet.</p>'}</div>
+      <div class="section-title"><h3>Quizzes <small>${topicQuizzes.length}</small></h3><button class="button button-outline button-small" data-action="new-content" data-kind="quizzes" data-topic-id="${topic.id}">＋ Add quiz</button></div><div class="admin-record-list">${contentRows(topicQuizzes, 'quizzes', 'quiz') || '<p class="empty-state">No quizzes in this topic yet.</p>'}</div>
+    </section>`;
+  }).join('');
+  const enabled = Number(subject.certificate_enabled) === 1 || subject.certificate_enabled === true;
+  return shell(`${heading('SUBJECT WORKSPACE', escapeHtml(subject.name), escapeHtml(subject.description || 'Manage this subject’s topics, lessons, quizzes, and certificate rules.'), `<div class="page-heading-actions"><a href="#/manage-subjects" class="button button-outline">← All subjects</a><button class="button button-outline" data-action="edit-content" data-kind="subjects" data-id="${subject.id}">Edit subject</button><button class="button button-primary" data-action="new-content" data-kind="topics" data-subject-id="${subject.id}">＋ Add topic</button></div>`)}
+    <section class="panel subject-certificate-summary"><div><div class="eyebrow">CERTIFICATE RULES</div><b>${enabled ? 'Certificates enabled' : 'Certificates disabled'}</b><p>${enabled ? `${Number(subject.required_completion_percent)}% lesson completion · ${Number(subject.minimum_quiz_score)}% minimum on every quiz` : 'Students will not earn a certificate for this subject.'}</p></div></section>
+    <div class="subject-management-topics">${topicSections || '<section class="panel empty-panel"><h2>No topics yet</h2><p>Add a topic to start organizing this subject’s learning content.</p><button class="button button-primary" data-action="new-content" data-kind="topics" data-subject-id="${subject.id}">＋ Add the first topic</button></section>'}</div>`,
+  subject.name, `manage-subject/${subject.id}`);
 }
 
 function teacherApplicationPage() {
@@ -1024,21 +1063,23 @@ function questionFields(question = {}, index = 0) {
   return `<div class="panel quiz-question-editor"><div class="form-section-title"><h3>Question ${index + 1}</h3><button type="button" class="quiet-button danger-text" data-action="remove-content-question">Remove</button></div><label>Question<textarea name="question_text" required rows="2">${escapeHtml(question.question_text || question.question || '')}</textarea></label><label>Type<select name="type" class="quiz-question-type"><option value="multiple_choice" ${type === 'multiple_choice' ? 'selected' : ''}>Multiple choice</option><option value="true_false" ${type === 'true_false' ? 'selected' : ''}>True / False</option><option value="identification" ${identification ? 'selected' : ''}>Identification</option></select></label><div class="form-grid quiz-option-fields" ${identification ? 'hidden' : ''}><label>Option A<input name="option_a" value="${escapeHtml(question.option_a || '')}" /></label><label>Option B<input name="option_b" value="${escapeHtml(question.option_b || '')}" /></label><label>Option C<input name="option_c" value="${escapeHtml(question.option_c || '')}" /></label><label>Option D<input name="option_d" value="${escapeHtml(question.option_d || '')}" /></label></div><label class="quiz-correct-select" ${identification ? 'hidden' : ''}>Correct answer<select name="correct_option" ${identification ? '' : 'required'}><option value="">Choose answer</option>${(type === 'true_false' ? ['True', 'False'] : ['A', 'B', 'C', 'D']).map((option) => `<option value="${option}" ${correct === option ? 'selected' : ''}>${option}</option>`).join('')}</select></label><label class="quiz-correct-text" ${identification ? '' : 'hidden'}>Correct answer<input name="correct_option_text" maxlength="255" value="${escapeHtml(identification ? correct : '')}" ${identification ? 'required' : ''} placeholder="Enter the expected answer" /></label><label>Explanation<textarea name="explanation" rows="2">${escapeHtml(question.explanation || '')}</textarea></label></div>`;
 }
 
-function contentForm(kind, id = '') {
+function contentForm(kind, id = '', parentId = '') {
   const entries = management[kind] || [];
   const entry = entries.find((item) => String(item.id) === String(id)) || {};
   const title = entry.name || entry.title || '';
   let fields = '';
   if (kind === 'subjects') {
-    fields = `<label>Subject name<input name="name" required maxlength="150" value="${escapeHtml(title)}" /></label><label>Description<textarea name="description" rows="3">${escapeHtml(entry.description || '')}</textarea></label>`;
+    const certificatesEnabled = Number(entry.certificate_enabled) === 1 || entry.certificate_enabled === true;
+    fields = `<label>Subject name<input name="name" required maxlength="150" value="${escapeHtml(title)}" /></label><label>Description<textarea name="description" rows="3">${escapeHtml(entry.description || '')}</textarea></label><div class="form-section-title"><div><div class="eyebrow">CERTIFICATE SETTINGS</div><h2>Student completion certificate</h2></div></div><label class="check-row"><input name="certificate_enabled" type="checkbox" value="1" ${certificatesEnabled ? 'checked' : ''} /> Enable certificates for this subject</label><p class="form-help">When enabled, eligible students receive one downloadable certificate. Disabling it prevents new certificates from being issued.</p><div class="form-grid"><label>Required lesson completion (%)<input name="required_completion_percent" type="number" min="1" max="100" required value="${escapeHtml(entry.required_completion_percent ?? 100)}" /></label><label>Minimum score for each quiz (%)<input name="minimum_quiz_score" type="number" min="0" max="100" required value="${escapeHtml(entry.minimum_quiz_score ?? 70)}" /></label></div>`;
   } else if (kind === 'topics') {
-    fields = `<label>Subject<select name="subject_id" required><option value="">Choose a subject</option>${management.subjects.map((subject) => `<option value="${subject.id}" ${Number(entry.subject_id) === Number(subject.id) ? 'selected' : ''}>${escapeHtml(subject.name)}</option>`).join('')}</select></label><label>Topic title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Summary<textarea name="summary" rows="3">${escapeHtml(entry.summary || '')}</textarea></label>`;
+    const subjectId = entry.subject_id ?? parentId;
+    fields = `<label>Subject<select name="subject_id" required><option value="">Choose a subject</option>${management.subjects.map((subject) => `<option value="${subject.id}" ${Number(subjectId) === Number(subject.id) ? 'selected' : ''}>${escapeHtml(subject.name)}</option>`).join('')}</select></label><label>Topic title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Summary<textarea name="summary" rows="3">${escapeHtml(entry.summary || '')}</textarea></label>`;
   } else if (kind === 'lessons') {
     const pdfUrl = `${apiBase}/api/lessons/${encodeURIComponent(id)}/pdf`;
-    fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Lesson title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Lesson content<textarea name="content" required rows="8">${escapeHtml(entry.content || '')}</textarea></label><label>PDF study material <span class="optional">(optional, max 20 MB)</span><input name="pdf_attachment" type="file" accept="application/pdf,.pdf" /><small class="form-help">Students will be able to view or download this file from the lesson page.</small></label>${entry.pdf_original_name ? `<div class="current-pdf"><a href="${pdfUrl}" target="_blank" rel="noopener">View current PDF: ${escapeHtml(entry.pdf_original_name)} ↗</a><a href="${pdfUrl}?download=1" class="text-link">Download PDF ↓</a><label class="check-row"><input type="checkbox" name="remove_pdf_attachment" value="1" /> Remove current PDF</label></div>` : ''}`;
+    fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id ?? parentId) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Lesson title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Lesson content<textarea name="content" required rows="8">${escapeHtml(entry.content || '')}</textarea></label><label>PDF study material <span class="optional">(optional, max 20 MB)</span><input name="pdf_attachment" type="file" accept="application/pdf,.pdf" /><small class="form-help">Students will be able to view or download this file from the lesson page.</small></label>${entry.pdf_original_name ? `<div class="current-pdf"><a href="${pdfUrl}" target="_blank" rel="noopener">View current PDF: ${escapeHtml(entry.pdf_original_name)} ↗</a><a href="${pdfUrl}?download=1" class="text-link">Download PDF ↓</a><label class="check-row"><input type="checkbox" name="remove_pdf_attachment" value="1" /> Remove current PDF</label></div>` : ''}`;
   } else {
     const questions = entry.questions?.length ? entry.questions : [{}];
-    fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Quiz title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Duration in minutes<input name="duration_minutes" type="number" required min="1" max="600" value="${escapeHtml(entry.time || 15)}" /></label><div class="form-section-title"><h2>Quiz questions</h2><button type="button" class="button button-outline button-small" data-action="add-content-question">＋ Add question</button></div><div id="quiz-question-fields">${questions.map((question, index) => questionFields(question, index)).join('')}</div>`;
+    fields = `<label>Topic<select name="topic_id" required><option value="">Choose a topic</option>${management.topics.map((topic) => `<option value="${topic.id}" ${Number(entry.topic_id ?? parentId) === Number(topic.id) ? 'selected' : ''}>${escapeHtml(topic.subject)} · ${escapeHtml(topic.title)}</option>`).join('')}</select></label><label>Quiz title<input name="title" required maxlength="180" value="${escapeHtml(title)}" /></label><label>Duration in minutes<input name="duration_minutes" type="number" required min="1" max="600" value="${escapeHtml(entry.time || 15)}" /></label><div class="form-section-title"><h2>Quiz questions</h2><button type="button" class="button button-outline button-small" data-action="add-content-question">＋ Add question</button></div><div id="quiz-question-fields">${questions.map((question, index) => questionFields(question, index)).join('')}</div>`;
   }
   const overlay = document.createElement('div');
   overlay.className = 'modal-backdrop';
@@ -1062,8 +1103,8 @@ function certificatesPage() {
     </div>
     <a class="button button-primary" href="${apiBase}/api/certificates/${encodeURIComponent(certificate.id)}/download">Download certificate ↓</a>
   </article>`).join('');
-  return shell(`${heading('YOUR ACHIEVEMENTS', 'My certificates', 'Read every lesson in a teacher’s subject and, if it has quizzes, score at least 70% on each one.', '<a href="#/profile" class="button button-outline">← Profile settings</a>')}
-    <div class="certificate-list">${cards || '<section class="panel empty-panel"><span>✳</span><h2>No certificates yet</h2><p>Read every lesson in a teacher-created subject and pass each available quiz with at least 70%. Your certificate will appear here automatically.</p><a class="button button-outline" href="#/subjects">Browse subjects →</a></section>'}</div>`,
+  return shell(`${heading('YOUR ACHIEVEMENTS', 'My certificates', 'Earn a certificate when you meet the completion rules set by the subject’s teacher.', '<a href="#/profile" class="button button-outline">← Profile settings</a>')}
+    <div class="certificate-list">${cards || '<section class="panel empty-panel"><span>✳</span><h2>No certificates yet</h2><p>Your teacher decides whether a subject offers a certificate and sets the lesson-completion and quiz-score requirements.</p><a class="button button-outline" href="#/subjects">Browse subjects →</a></section>'}</div>`,
   'My certificates', 'profile');
 }
 
@@ -1342,7 +1383,12 @@ app.addEventListener('submit', async (event) => {
     const values = formData(form);
     let payload = values;
     let requestBody;
-    if (kind === 'lessons') {
+    if (kind === 'subjects') {
+      payload.certificate_enabled = form.elements.certificate_enabled.checked ? 1 : 0;
+      payload.required_completion_percent = Number(values.required_completion_percent);
+      payload.minimum_quiz_score = Number(values.minimum_quiz_score);
+      requestBody = JSON.stringify(payload);
+    } else if (kind === 'lessons') {
       requestBody = new FormData(form);
     } else if (kind === 'quizzes') {
       const questionRows = [...form.querySelectorAll('.quiz-question-editor')];
@@ -1596,7 +1642,10 @@ app.addEventListener('click', async (event) => {
   } else if (action === 'menu') {
     document.querySelector('#sidebar')?.classList.toggle('open');
   } else if (action === 'new-content' || action === 'edit-content') {
-    contentForm(button.dataset.kind, action === 'edit-content' ? id : '');
+    const parentId = button.dataset.kind === 'topics'
+      ? button.dataset.subjectId || ''
+      : button.dataset.topicId || '';
+    contentForm(button.dataset.kind, action === 'edit-content' ? id : '', parentId);
   } else if (action === 'private-add-subject') {
     privateLibraryForm('subjects');
   } else if (action === 'private-add-topic') {
@@ -1671,6 +1720,18 @@ app.addEventListener('click', async (event) => {
     save('favorites', favorites);
     render();
     notify(result.saved ? 'Lesson saved to your favorites.' : 'Lesson removed from your favorites.');
+  } else if (action === 'favorite-subject') {
+    const subjectId = Number(id);
+    const result = await apiCall('/subject-favorites', {
+      method: 'POST',
+      body: JSON.stringify({ subject_id: subjectId }),
+    });
+    if (!result) return;
+    state.favoriteSubjects = result.saved
+      ? [...new Set([...state.favoriteSubjects, subjectId])]
+      : state.favoriteSubjects.filter((item) => item !== subjectId);
+    render();
+    notify(result.saved ? 'Subject saved to your favorites.' : 'Subject removed from your favorites.');
   } else if (action === 'view-lesson-pdf') {
     const lessonId = Number(id);
     releaseLessonPdf();
