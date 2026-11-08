@@ -693,6 +693,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .private-pdf-actions { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 7px; }
 .private-content-row .admin-content-actions { align-items: center; }
 .private-library-form .quiz-question-editor { margin: 12px 0; }
+.private-ai-generator { display: grid; gap: 12px; margin: 18px 0; padding: 17px; border: 1px solid #e8eee8; border-radius: 10px; background: #fbfcfa; }
+.private-ai-generator h3, .private-ai-generator p { margin: 0; }
+.private-ai-generator h3 { color: #432b31; font-size: 15px; }
+.private-ai-generator p { color: #78847b; font-size: 11px; line-height: 1.6; }
+.private-ai-generator .form-grid { margin: 0; }
+.private-ai-generator .check-row { margin: 0; align-items: flex-start; }
 .certificate-list { display: grid; gap: 12px; }
 .certificate-card { display: flex; align-items: center; gap: 18px; padding: 22px; }
 .certificate-mark { display: grid; flex: 0 0 50px; width: 50px; height: 50px; place-items: center; border-radius: 50%; background: #f3f5e9; color: #8c8050; font-size: 27px; }
