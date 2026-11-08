@@ -46,6 +46,7 @@ let state = {
 const lessonReviewRequests = new Set();
 const viewedPdfSyncRequests = new Set();
 let quizSession = null;
+let quizTimerInterval = null;
 let flashcardSession = null;
 let toastTimer;
 let loadingTimer = null;
@@ -884,7 +885,99 @@ function activeQuiz() {
   if (!q) return render();
   const item = quizQuestions[q.index];
   const identification = item.type === 'identification';
-  return shell(`${heading(`QUESTION ${q.index + 1} OF ${quizQuestions.length}`, 'Stay curious.', identification ? 'Type your answer below. You can move between questions any time.' : 'Choose one answer. You can move between questions any time.', '<button class="button button-outline" data-action="exit-quiz">Leave quiz</button>')}<div class="quiz-progress"><span style="width:${((q.index + 1) / quizQuestions.length) * 100}%"></span></div><div class="active-quiz-layout"><article class="panel question-panel"><div class="question-top"><span class="tag tag-mint">QUESTION ${String(q.index + 1).padStart(2, '0')}</span><span class="question-type">${identification ? 'IDENTIFICATION' : item.type === 'true_false' ? 'TRUE / FALSE' : 'MULTIPLE CHOICE'}</span></div><h2>${escapeHtml(item.question)}</h2>${identification ? `<label class="identification-answer">Your answer<input id="identification-answer" type="text" maxlength="255" autocomplete="off" value="${escapeHtml(q.answers[q.index] || '')}" placeholder="Type your answer..." /></label>` : `<div class="answer-list">${item.options.map((option, index) => `<button class="answer-option ${q.answers[q.index] === index ? 'selected' : ''}" data-action="answer" data-index="${index}"><span>${item.type === 'true_false' ? (index === 0 ? 'T' : 'F') : String.fromCharCode(65 + index)}</span>${escapeHtml(option)}</button>`).join('')}</div>`}<div class="question-actions"><button class="button button-outline" data-action="question-prev" ${q.index === 0 ? 'disabled' : ''}>← Previous</button>${q.index < quizQuestions.length - 1 ? '<button class="button button-primary" data-action="question-next">Next question →</button>' : '<button class="button button-primary" data-action="submit-quiz">Finish practice ✓</button>'}</div></article><aside class="panel question-nav-panel"><div class="eyebrow">YOUR QUESTIONS</div><h3>Go at your own pace</h3><div class="question-numbers">${quizQuestions.map((_, i) => `<button class="${i === q.index ? 'current' : ''} ${q.answers[i] !== undefined && String(q.answers[i]).trim() !== '' ? 'answered' : ''}" data-action="jump-question" data-index="${i}">${String(i + 1).padStart(2, '0')}</button>`).join('')}</div><p><span class="legend-dot"></span> Answered <span class="legend-dot unfilled"></span> To do</p></aside></div>`, 'Active quiz', 'quizzes');
+  const remaining = Math.max(0, Math.ceil((q.deadline - performance.now()) / 1000));
+  const timeLabel = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+  return shell(`${heading(`QUESTION ${q.index + 1} OF ${quizQuestions.length}`, 'Stay curious.', identification ? 'Type your answer below. You can move between questions any time.' : 'Choose one answer. You can move between questions any time.', '<button class="button button-outline" data-action="exit-quiz">Leave quiz</button>')}<div class="quiz-timer ${remaining <= 60 ? 'is-urgent' : ''}" role="timer" aria-live="polite"><span>TIME REMAINING</span><strong id="quiz-countdown">${timeLabel}</strong><span id="quiz-timeout-message"></span><button class="button button-outline button-small" id="quiz-timeout-retry" data-action="submit-quiz" hidden>Retry submission</button></div><div class="quiz-progress"><span style="width:${((q.index + 1) / quizQuestions.length) * 100}%"></span></div><div class="active-quiz-layout"><article class="panel question-panel"><div class="question-top"><span class="tag tag-mint">QUESTION ${String(q.index + 1).padStart(2, '0')}</span><span class="question-type">${identification ? 'IDENTIFICATION' : item.type === 'true_false' ? 'TRUE / FALSE' : 'MULTIPLE CHOICE'}</span></div><h2>${escapeHtml(item.question)}</h2>${identification ? `<label class="identification-answer">Your answer<input id="identification-answer" type="text" maxlength="255" autocomplete="off" value="${escapeHtml(q.answers[q.index] || '')}" placeholder="Type your answer..." ${q.timeExpired ? 'disabled' : ''} /></label>` : `<div class="answer-list">${item.options.map((option, index) => `<button class="answer-option ${q.answers[q.index] === index ? 'selected' : ''}" data-action="answer" data-index="${index}" ${q.timeExpired ? 'disabled' : ''}><span>${item.type === 'true_false' ? (index === 0 ? 'T' : 'F') : String.fromCharCode(65 + index)}</span>${escapeHtml(option)}</button>`).join('')}</div>`}<div class="question-actions"><button class="button button-outline" data-action="question-prev" ${q.index === 0 || q.timeExpired ? 'disabled' : ''}>← Previous</button>${q.index < quizQuestions.length - 1 ? `<button class="button button-primary" data-action="question-next" ${q.timeExpired ? 'disabled' : ''}>Next question →</button>` : '<button class="button button-primary" data-action="submit-quiz">Finish practice ✓</button>'}</div></article><aside class="panel question-nav-panel"><div class="eyebrow">YOUR QUESTIONS</div><h3>Go at your own pace</h3><div class="question-numbers">${quizQuestions.map((_, i) => `<button class="${i === q.index ? 'current' : ''} ${q.answers[i] !== undefined && String(q.answers[i]).trim() !== '' ? 'answered' : ''}" data-action="jump-question" data-index="${i}" ${q.timeExpired ? 'disabled' : ''}>${String(i + 1).padStart(2, '0')}</button>`).join('')}</div><p><span class="legend-dot"></span> Answered <span class="legend-dot unfilled"></span> To do</p></aside></div>`, 'Active quiz', 'quizzes');
+}
+
+function stopQuizCountdown() {
+  if (quizTimerInterval !== null) {
+    clearInterval(quizTimerInterval);
+    quizTimerInterval = null;
+  }
+}
+
+function updateQuizCountdown() {
+  if (!quizSession || route() !== 'active-quiz') {
+    stopQuizCountdown();
+    return;
+  }
+  const remaining = Math.max(0, Math.ceil((quizSession.deadline - performance.now()) / 1000));
+  const display = document.querySelector('#quiz-countdown');
+  if (display) {
+    display.textContent = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+  }
+  document.querySelector('.quiz-timer')?.classList.toggle('is-urgent', remaining <= 60);
+  if (remaining === 0 && !quizSession.timeExpired) {
+    quizSession.timeExpired = true;
+    stopQuizCountdown();
+    render();
+    document.querySelector('#quiz-timeout-message').textContent = 'Time is up. Submitting your answers…';
+    void withLoading(() => submitActiveQuiz(true));
+  }
+}
+
+function startQuizCountdown() {
+  stopQuizCountdown();
+  updateQuizCountdown();
+  quizTimerInterval = setInterval(updateQuizCountdown, 250);
+}
+
+async function submitActiveQuiz(timeExpired = false) {
+  if (!quizSession || quizSession.submitting) return;
+  quizSession.submitting = true;
+  if (timeExpired) quizSession.timeExpired = true;
+  const answers = {};
+  quizQuestions.forEach((question, index) => {
+    const selected = quizSession.answers[index];
+    if (selected === undefined || String(selected).trim() === '') return;
+    answers[question.id] = question.type === 'identification'
+      ? String(selected).trim()
+      : question.type === 'true_false'
+        ? question.options[selected]
+        : String.fromCharCode(65 + selected);
+  });
+  const active = quizSession;
+  const result = await apiCall(`${active.isPrivate ? '/my-library/quizzes' : '/quizzes'}/${encodeURIComponent(active.quizId)}/attempts`, {
+    method: 'POST',
+    body: JSON.stringify({ answers, timer_token: active.timerToken }),
+  });
+  if (!result) {
+    if (quizSession === active) {
+      active.submitting = false;
+      if (timeExpired) {
+        const message = document.querySelector('#quiz-timeout-message');
+        if (message) message.textContent = 'Could not submit yet. Check your connection, then retry.';
+        const retry = document.querySelector('#quiz-timeout-retry');
+        if (retry) retry.hidden = false;
+      }
+    }
+    return;
+  }
+  stopQuizCountdown();
+  const quiz = quizzes.find((item) => Number(item.id) === Number(active.quizId));
+  state.quizResult = {
+    ...result,
+    title: active.title || quiz?.title || '',
+    subject: active.subject || quiz?.subject || '',
+    review: result.review.map((item) => ({
+      ...item,
+      selected: item.type === 'identification'
+        ? item.selected_option || undefined
+        : item.type === 'true_false'
+          ? item.options.indexOf(item.selected_option)
+          : item.selected_option ? item.selected_option.charCodeAt(0) - 65 : undefined,
+    })),
+  };
+  const attempt = {
+    title: state.quizResult.title,
+    subject: state.quizResult.subject,
+    score: Number(result.percentage),
+    date: new Date().toISOString(),
+  };
+  save('attempts', [attempt, ...state.attempts]);
+  await refreshCertificates(true);
+  go('quiz-results');
 }
 
 function quizResult() {
@@ -1528,6 +1621,7 @@ app.addEventListener('submit', async (event) => {
 app.addEventListener('input', (event) => {
   if (['lesson-search', 'set-search', 'quiz-search'].includes(event.target.id)) filterCards();
   if (event.target.id === 'identification-answer' && quizSession) {
+    if (quizSession.timeExpired) return;
     quizSession.answers[quizSession.index] = event.target.value;
     const number = document.querySelector(`.question-numbers [data-index="${quizSession.index}"]`);
     number?.classList.toggle('answered', event.target.value.trim() !== '');
@@ -1843,7 +1937,19 @@ app.addEventListener('click', async (event) => {
       notify('This quiz does not have any questions yet.');
       return;
     }
+    const timerRequestStartedAt = performance.now();
+    const timer = await apiCall(`${isPrivate ? '/my-library/quizzes' : '/quizzes'}/${encodeURIComponent(quizId)}/start`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    if (!timer) return;
+    if (!timer.timer_token || !Number.isFinite(Number(timer.duration_seconds))) {
+      notify('StudyNest could not start the quiz timer. Please try again.');
+      return;
+    }
     quizQuestions = quiz.questions;
+    const requestRoundTrip = performance.now() - timerRequestStartedAt;
+    const remainingMilliseconds = Math.max(0, Number(timer.duration_seconds) * 1000 - requestRoundTrip / 2);
     quizSession = {
       quizId,
       isPrivate,
@@ -1852,69 +1958,35 @@ app.addEventListener('click', async (event) => {
       returnRoute: isPrivate ? 'my-library' : button.dataset.returnRoute || 'quizzes',
       index: 0,
       answers: {},
-      startedAt: Date.now(),
+      timerToken: timer.timer_token,
+      deadline: performance.now() + remainingMilliseconds,
+      timeExpired: false,
+      submitting: false,
     };
     go('active-quiz');
+    startQuizCountdown();
   } else if (action === 'answer') {
+    if (quizSession?.timeExpired || quizSession?.submitting) return;
     if (quizSession) quizSession.answers[quizSession.index] = Number(button.dataset.index);
     render();
   } else if (action === 'question-next') {
+    if (quizSession?.timeExpired || quizSession?.submitting) return;
     if (quizSession) quizSession.index = Math.min(quizSession.index + 1, quizQuestions.length - 1);
     render();
   } else if (action === 'question-prev') {
+    if (quizSession?.timeExpired || quizSession?.submitting) return;
     if (quizSession) quizSession.index = Math.max(quizSession.index - 1, 0);
     render();
   } else if (action === 'jump-question') {
+    if (quizSession?.timeExpired || quizSession?.submitting) return;
     if (quizSession) quizSession.index = Number(button.dataset.index);
     render();
   } else if (action === 'exit-quiz') {
     const returnRoute = quizSession?.returnRoute || (quizSession?.isPrivate ? 'my-library' : 'quizzes');
+    stopQuizCountdown();
     quizSession = null;
     go(returnRoute);
-  } else if (action === 'submit-quiz') {
-    const answers = {};
-    quizQuestions.forEach((question, index) => {
-      const selected = quizSession.answers[index];
-      if (selected === undefined || String(selected).trim() === '') return;
-      answers[question.id] = question.type === 'identification'
-        ? String(selected).trim()
-        : question.type === 'true_false'
-          ? question.options[selected]
-          : String.fromCharCode(65 + selected);
-    });
-    const result = await apiCall(`${quizSession.isPrivate ? '/my-library/quizzes' : '/quizzes'}/${encodeURIComponent(quizSession.quizId)}/attempts`, {
-      method: 'POST',
-      body: JSON.stringify({
-        answers,
-        time_taken: `${Math.floor((Date.now() - quizSession.startedAt) / 1000)}s`,
-        duration_seconds: Math.floor((Date.now() - quizSession.startedAt) / 1000),
-      }),
-    });
-    if (!result) return;
-    const quiz = quizzes.find((item) => Number(item.id) === Number(quizSession.quizId));
-    state.quizResult = {
-      ...result,
-      title: quizSession.title || quiz?.title || '',
-      subject: quizSession.subject || quiz?.subject || '',
-      review: result.review.map((item) => ({
-        ...item,
-        selected: item.type === 'identification'
-          ? item.selected_option || undefined
-          : item.type === 'true_false'
-            ? item.options.indexOf(item.selected_option)
-            : item.selected_option ? item.selected_option.charCodeAt(0) - 65 : undefined,
-      })),
-    };
-    const attempt = {
-      title: state.quizResult.title,
-      subject: state.quizResult.subject,
-      score: Number(result.percentage),
-      date: new Date().toISOString(),
-    };
-    save('attempts', [attempt, ...state.attempts]);
-    await refreshCertificates(true);
-    go('quiz-results');
-  }
+  } else if (action === 'submit-quiz') await submitActiveQuiz();
   } finally {
     finishLoading();
   }
@@ -1927,13 +1999,19 @@ app.addEventListener('load', (event) => {
 }, true);
 
 window.addEventListener('hashchange', () => {
+  if (route() !== 'active-quiz') stopQuizCountdown();
   document.querySelector('.modal-backdrop')?.remove();
   render();
+  if (route() === 'active-quiz') updateQuizCountdown();
   if (route() === 'notifications' && state.user) {
     refreshStoredNotifications().then((loaded) => {
       if (loaded && route() === 'notifications') render();
     });
   }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) updateQuizCountdown();
 });
 
 render();

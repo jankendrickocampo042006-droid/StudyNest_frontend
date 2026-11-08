@@ -295,6 +295,12 @@ form input::placeholder, form textarea::placeholder { color: #b0b9b3; }
 .ready-stats b { color: #51685a; }
 .quiz-progress { height: 6px; overflow: hidden; margin: 0 0 15px; border-radius: 5px; background: #e9eee9; }
 .quiz-progress span { display: block; height: 100%; background: #76a287; transition: width .2s; }
+.quiz-timer { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 13px; border: 1px solid #e8ede8; border-radius: 8px; background: #fff; color: #78867d; font-size: 9px; }
+.quiz-timer strong { min-width: 48px; color: #405c49; font-variant-numeric: tabular-nums; font-size: 16px; }
+.quiz-timer.is-urgent { border-color: #e8c9ce; background: #fff7f8; color: #9c3d4b; }
+.quiz-timer.is-urgent strong { color: #9c3d4b; }
+.quiz-timer #quiz-timeout-message { flex: 1; }
+.quiz-timer [hidden] { display: none; }
 .active-quiz-layout { display: grid; grid-template-columns: 1fr 230px; gap: 14px; align-items: start; }
 .question-panel, .question-nav-panel { padding: 20px; }
 .question-top { display: flex; justify-content: space-between; align-items: center; }
