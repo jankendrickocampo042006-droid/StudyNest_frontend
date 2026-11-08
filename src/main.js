@@ -794,7 +794,7 @@ function privateLibraryPage() {
   const subjectsMarkup = privateLibrary.map((subject) => `<section class="panel private-subject-card">
     <div class="section-title"><div><div class="eyebrow">YOUR PRIVATE SUBJECT</div><h2>${escapeHtml(subject.name)}</h2><p>${escapeHtml(subject.description || '')}</p></div>
     <div class="admin-content-actions"><button class="quiet-button" data-action="private-add-topic" data-id="${subject.id}">＋ Add topic</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="subjects" data-id="${subject.id}" data-title="${escapeHtml(subject.name)}">Delete</button></div></div>
-    ${(subject.topics || []).map((topic) => `<article class="private-topic-card"><div class="section-title"><div><span class="eyebrow">TOPIC</span><h3>${escapeHtml(topic.title)}</h3></div><div class="admin-content-actions"><button class="quiet-button" data-action="private-add-lesson" data-id="${topic.id}">＋ Lesson</button><button class="quiet-button" data-action="private-add-quiz" data-id="${topic.id}">＋ Quiz</button><button class="quiet-button" data-action="private-add-quiz" data-id="${topic.id}" data-generate="true">＋ AI quiz</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="topics" data-id="${topic.id}" data-title="${escapeHtml(topic.title)}">Delete</button></div></div>
+    ${(subject.topics || []).map((topic) => `<article class="private-topic-card"><div class="section-title"><div><span class="eyebrow">TOPIC</span><h3>${escapeHtml(topic.title)}</h3></div><div class="admin-content-actions"><button class="quiet-button" data-action="private-add-lesson" data-id="${topic.id}">＋ Lesson</button><button class="quiet-button" data-action="private-add-quiz" data-id="${topic.id}">＋ Quiz</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="topics" data-id="${topic.id}" data-title="${escapeHtml(topic.title)}">Delete</button></div></div>
       <div class="private-content-list">
         ${(topic.lessons || []).map((lesson) => `<div class="private-content-row"><div><b>${escapeHtml(lesson.title)}</b><p class="private-lesson-notes">${escapeHtml(lesson.content || '')}</p>${lesson.pdf_original_name ? `<div class="private-pdf-actions"><a class="text-link" href="${apiBase}/api/my-library/lessons/${encodeURIComponent(lesson.id)}/pdf" target="_blank" rel="noopener">View PDF ↗</a><a class="text-link" href="${apiBase}/api/my-library/lessons/${encodeURIComponent(lesson.id)}/pdf?download=1">Download PDF ↓</a></div>` : ''}</div><button class="quiet-button danger-text" data-action="private-delete" data-kind="lessons" data-id="${lesson.id}" data-title="${escapeHtml(lesson.title)}">Delete</button></div>`).join('')}
         ${(topic.quizzes || []).map((quiz) => `<div class="private-content-row"><div><b>${escapeHtml(quiz.title)}</b><p>${quiz.questions} questions · ${quiz.time} minutes</p></div><div class="admin-content-actions"><button class="button button-outline button-small" data-action="start-quiz" data-id="private-${quiz.id}">Start quiz →</button><button class="quiet-button danger-text" data-action="private-delete" data-kind="quizzes" data-id="${quiz.id}" data-title="${escapeHtml(quiz.title)}">Delete</button></div></div>`).join('')}
@@ -822,41 +822,12 @@ function privateLibraryForm(kind, id = '') {
   } else if (kind === 'lessons') {
     fields = `<input type="hidden" name="topic_id" value="${escapeHtml(topic?.id || '')}" /><label>Lesson title<input name="title" required maxlength="180" /></label><label>Lesson notes<textarea name="content" required rows="7"></textarea></label><label>Attach PDF (optional)<input name="private_pdf" type="file" accept="application/pdf,.pdf" /><span class="form-help">PDF only, maximum 20 MB. It is stored privately with your lesson.</span></label>`;
   } else {
-    fields = `<input type="hidden" name="topic_id" value="${escapeHtml(topic?.id || '')}" /><label>Quiz title<input name="title" required maxlength="180" /></label><label>Time limit (minutes)<input name="duration_minutes" type="number" min="1" max="180" value="15" required /></label><section class="private-ai-generator"><div class="eyebrow">AI QUIZ DRAFT</div><h3>Generate questions from a PDF</h3><p>We send extracted text (up to 24,000 characters) to GroqCloud. Text-based PDFs only; files up to 8 MB and 150 pages.</p><div id="private-ai-quota" class="private-ai-quota" role="status" aria-live="polite">Checking your AI generation limit…</div><label>Choose PDF<input name="source_pdf" type="file" accept="application/pdf,.pdf" /></label><div class="form-grid"><label>Questions<select name="question_count">${[5, 6, 8, 10, 3, 4, 7, 9].map((count) => `<option value="${count}" ${count === 5 ? 'selected' : ''}>${count}</option>`).join('')}</select></label><label>Question type<select name="question_type"><option value="multiple_choice">Multiple choice</option><option value="true_false">True or false</option><option value="identification">Identification</option></select></label></div><label class="check-row"><input type="checkbox" name="ai_pdf_consent" value="1" /> I agree to send the extracted PDF text to GroqCloud, an external AI provider, to generate my quiz.</label><button type="button" class="button button-outline button-small" data-action="generate-private-quiz">Generate draft</button><p class="form-help">You can generate up to 10 questions per draft. Review and edit every question below before saving; generation does not save the quiz.</p></section><div id="quiz-question-fields">${questionFields({}, 0)}</div><button type="button" class="button button-outline button-small" data-action="add-content-question">＋ Add question</button>`;
+    fields = `<input type="hidden" name="topic_id" value="${escapeHtml(topic?.id || '')}" /><label>Quiz title<input name="title" required maxlength="180" /></label><label>Time limit (minutes)<input name="duration_minutes" type="number" min="1" max="180" value="15" required /></label><div id="quiz-question-fields">${questionFields({}, 0)}</div><button type="button" class="button button-outline button-small" data-action="add-content-question">＋ Add question</button>`;
   }
   const overlay = document.createElement('div');
   overlay.className = 'modal-backdrop';
   overlay.innerHTML = `<form class="modal panel content-modal private-library-modal ${kind === 'quizzes' ? 'private-library-quiz-modal' : ''}" id="private-library-form" data-kind="${kind}"><button type="button" class="modal-close" data-action="close-modal" aria-label="Close">×</button><div class="eyebrow">ONLY YOU CAN SEE THIS CONTENT</div><h2>${title}</h2>${fields}<div class="form-actions"><button type="button" class="button button-outline" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Save to my library →</button></div></form>`;
   app.append(overlay);
-}
-
-function formatQuotaReset(seconds) {
-  const totalMinutes = Math.max(1, Math.ceil(Number(seconds || 0) / 60));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
-}
-
-async function refreshPrivateQuizQuota(form) {
-  const indicator = form?.querySelector('#private-ai-quota');
-  const generateButton = form?.querySelector('[data-action="generate-private-quiz"]');
-  if (!indicator || !generateButton) return null;
-  indicator.textContent = 'Checking your AI generation limit…';
-  generateButton.disabled = true;
-  const quota = await apiCall('/my-library/ai-quiz-quota');
-  if (!quota) {
-    indicator.textContent = 'Could not load your AI generation limit. Please retry in a moment.';
-    generateButton.disabled = false;
-    return null;
-  }
-  const remaining = Number(quota.remaining);
-  const reset = Number(quota.reset_in_seconds);
-  indicator.classList.toggle('is-limit-reached', remaining < 1);
-  indicator.textContent = remaining > 0
-    ? `${remaining} of ${quota.limit} AI generations left in this 24-hour period. Up to ${quota.max_questions_per_generation} questions per draft.`
-    : `AI generation limit reached. You can try again in about ${formatQuotaReset(reset)}.`;
-  generateButton.disabled = remaining < 1;
-  return quota;
 }
 
 function setCard(set) {
@@ -1460,10 +1431,6 @@ app.addEventListener('submit', async (event) => {
     if (kind === 'lessons') {
       requestBody = new FormData(form);
     } else if (kind === 'quizzes') {
-      delete payload.source_pdf;
-      delete payload.question_count;
-      delete payload.question_type;
-      delete payload.ai_pdf_consent;
       payload.questions = [...form.querySelectorAll('.quiz-question-editor')].map((row) => {
         const question = Object.fromEntries([...row.querySelectorAll('[name]')].map((field) => [field.name, field.value]));
         question.correct_option = question.type === 'identification' ? question.correct_option_text : question.correct_option;
@@ -1687,60 +1654,6 @@ app.addEventListener('click', async (event) => {
     privateLibraryForm('lessons', id);
   } else if (action === 'private-add-quiz') {
     privateLibraryForm('quizzes', id);
-    await refreshPrivateQuizQuota(document.querySelector('#private-library-form'));
-    if (button.dataset.generate === 'true') {
-      document.querySelector('#private-library-form [name="source_pdf"]')?.focus();
-    }
-  } else if (action === 'generate-private-quiz') {
-    const form = document.querySelector('#private-library-form');
-    const file = form?.elements.source_pdf?.files?.[0];
-    if (!form || !file) {
-      notify('Choose a PDF file first.');
-      return;
-    }
-    if (file.size < 1 || file.size > 8 * 1024 * 1024) {
-      notify('Choose a PDF smaller than 8 MB.');
-      return;
-    }
-    if (!form.elements.ai_pdf_consent.checked) {
-      notify('Please confirm that you agree to send the extracted text to GroqCloud.');
-      return;
-    }
-    const generateButton = button;
-    generateButton.disabled = true;
-    generateButton.textContent = 'Generating…';
-    try {
-      const request = new FormData();
-      request.append('source_pdf', file);
-      request.append('topic_id', form.elements.topic_id.value);
-      request.append('question_count', form.elements.question_count.value);
-      request.append('question_type', form.elements.question_type.value);
-      request.append('ai_pdf_consent', '1');
-      const draft = await apiCall('/my-library/generate-quiz', { method: 'POST', body: request });
-      if (!draft) {
-        await refreshPrivateQuizQuota(form);
-        return;
-      }
-      form.elements.title.value = draft.title;
-      const questionFieldsContainer = form.querySelector('#quiz-question-fields');
-      questionFieldsContainer.innerHTML = draft.questions.map((question, index) => questionFields(question, index)).join('');
-      questionFieldsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      if (draft.quota) {
-        const indicator = form.querySelector('#private-ai-quota');
-        indicator?.classList.toggle('is-limit-reached', Number(draft.quota.remaining) < 1);
-        if (indicator) {
-          indicator.textContent = Number(draft.quota.remaining) > 0
-            ? `${draft.quota.remaining} of ${draft.quota.limit} AI generations left in this 24-hour period. Up to ${draft.quota.max_questions_per_generation} questions per draft.`
-            : `AI generation limit reached. You can try again in about ${formatQuotaReset(draft.quota.reset_in_seconds)}.`;
-        }
-      } else {
-        await refreshPrivateQuizQuota(form);
-      }
-      notify(`Draft generated with ${draft.questions.length} questions. Review and edit it before saving.${draft.source_truncated ? ' Only the first 24,000 characters of the PDF were used.' : ''}`);
-    } finally {
-      generateButton.textContent = 'Generate draft';
-      if (document.body.contains(form)) await refreshPrivateQuizQuota(form);
-    }
   } else if (action === 'private-delete') {
     if (!window.confirm(`Delete "${button.dataset.title}" and its contents? This cannot be undone.`)) return;
     const result = await apiCall(`/my-library/${button.dataset.kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });

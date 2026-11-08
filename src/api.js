@@ -24,7 +24,7 @@ export async function apiRequest(path, options = {}) {
     try {
       payload = JSON.parse(text);
     } catch {
-      throw new Error(`StudyNest API returned an invalid response (HTTP ${response.status}). Check the PHP API route and server logs.`);
+      throw new Error('StudyNest API returned an invalid response. Check the PHP API route and server logs.');
     }
   }
   if (payload.csrf_token) csrfToken = payload.csrf_token;
