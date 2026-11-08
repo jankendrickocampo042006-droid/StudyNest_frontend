@@ -338,8 +338,10 @@ td b { color: #536158; font-weight: 600; }
 .note-star { display: block; margin-bottom: 13px; color: #91a788; font-size: 28px; }
 .schedule-note h2 { max-width: 220px; margin: 8px 0; font-size: 18px; line-height: 1.45; }
 .schedule-note p { margin: 0; color: #859189; font-size: 10px; line-height: 1.8; }
-.notification-list { display: grid; gap: 10px; max-width: 850px; }
+.notification-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; max-width: 1120px; }
+.notification-list { display: grid; gap: 10px; }
 .notification-card { width: 100%; display: flex; align-items: center; gap: 13px; padding: 14px 16px; color: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+.notification-card:focus-visible { outline: 3px solid #9acbb4; outline-offset: 2px; }
 .notification-card:hover { border-color: #dcc2c9; box-shadow: 0 5px 16px #39242a0d; }
 .notification-card.is-unread { border-left: 3px solid var(--green); background: #fffafb; }
 .notification-card.is-read { opacity: .76; }
@@ -354,6 +356,15 @@ td b { color: #536158; font-weight: 600; }
 .notification-copy > span { display: block; color: #89968e; font-size: 9px; }
 .notification-status { flex: 0 0 auto; color: #9c858c; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
 .notification-card.is-unread .notification-status { color: var(--green); }
+.notification-settings { position: sticky; top: 18px; padding: 18px; }
+.notification-settings h2 { margin: 7px 0; font-size: 14px; }
+.notification-settings > p { margin: 0 0 15px; color: #89968e; font-size: 9px; line-height: 1.6; }
+.notification-preference { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-top: 1px solid #f0ecec; cursor: pointer; }
+.notification-preference b, .notification-preference small { display: block; }
+.notification-preference b { color: var(--ink); font-size: 10px; }
+.notification-preference small { max-width: 190px; margin-top: 4px; color: #89968e; font-size: 8px; line-height: 1.5; }
+.notification-preference input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--green); }
+.notification-settings > button { margin-top: 8px; }
 .activity-panel { max-width: 800px; padding: 20px; }
 .activity-panel .section-title h2 { font-size: 14px; }
 .timeline-item { position: relative; display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid #edf0ed; }
@@ -491,7 +502,7 @@ td b { color: #536158; font-weight: 600; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); gap: 9px; }
   .metric-card { min-height: 106px; padding: 12px; }
   .metric-card strong { font-size: 22px; }
-  .dashboard-grid, .progress-grid, .schedule-layout, .active-quiz-layout, .lesson-detail-layout { grid-template-columns: 1fr; }
+  .dashboard-grid, .progress-grid, .schedule-layout, .active-quiz-layout, .lesson-detail-layout, .notification-layout { grid-template-columns: 1fr; }
   .continue-card { grid-template-columns: 110px 1fr; }
   .continue-art span { font-size: 40px; }
   .subject-grid, .quiz-grid { grid-template-columns: 1fr; }
@@ -521,7 +532,8 @@ td b { color: #536158; font-weight: 600; }
   .schedule-item { gap: 8px; }
   .schedule-item .quiet-button { padding: 5px; }
   .notification-card { align-items: flex-start; }
-  .notification-card p { line-height: 1.5; }
+  .notification-settings { position: static; }
+  .notification-status { margin-left: auto; }
   .app-footer { gap: 6px; padding: 14px 15px; font-size: 8px; }
   .app-footer span { text-align: right; }
   .auth-screen { grid-template-columns: 1fr; }

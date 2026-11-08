@@ -29,6 +29,10 @@ let state = {
   certificates: [],
   notifications: [],
   readNotificationIds: [],
+  notificationPreferences: {
+    email_certificates: true,
+    email_content_updates: true,
+  },
   quizResult: null,
   activeLessonId: null,
   activePdfLessonId: null,
@@ -235,24 +239,62 @@ function storeReadNotifications() {
 }
 
 function unreadNotificationCount() {
-  return state.notifications.filter((item) => !state.readNotificationIds.includes(item.id)).length;
+  return state.notifications.filter((item) => !item.isRead && !state.readNotificationIds.includes(item.id)).length;
 }
 
-function markNotificationAsRead(id) {
-  if (!state.notifications.some((item) => item.id === id) || state.readNotificationIds.includes(id)) return;
-  state.readNotificationIds = [...state.readNotificationIds, id];
-  storeReadNotifications();
+async function markNotificationAsRead(id) {
+  const notification = state.notifications.find((item) => item.id === id);
+  if (!notification || notification.isRead || state.readNotificationIds.includes(id)) return;
+  if (notification.backendId) {
+    const result = await apiCall(`/notifications/${notification.backendId}`, { method: 'PUT', body: JSON.stringify({}) });
+    if (!result) return;
+    notification.isRead = true;
+  } else {
+    state.readNotificationIds = [...state.readNotificationIds, id];
+    storeReadNotifications();
+  }
   render();
 }
 
-function markAllNotificationsAsRead() {
+async function markAllNotificationsAsRead() {
+  const unreadServerNotifications = state.notifications.filter((item) => item.backendId && !item.isRead);
+  if (unreadServerNotifications.length) {
+    const result = await apiCall('/notifications/read-all', { method: 'POST', body: JSON.stringify({}) });
+    if (!result) return;
+    unreadServerNotifications.forEach((item) => { item.isRead = true; });
+  }
   const unreadIds = state.notifications
-    .filter((item) => !state.readNotificationIds.includes(item.id))
+    .filter((item) => !item.backendId && !item.isRead && !state.readNotificationIds.includes(item.id))
     .map((item) => item.id);
-  if (!unreadIds.length) return;
-  state.readNotificationIds = [...new Set([...state.readNotificationIds, ...unreadIds])];
-  storeReadNotifications();
+  if (unreadIds.length) {
+    state.readNotificationIds = [...new Set([...state.readNotificationIds, ...unreadIds])];
+    storeReadNotifications();
+  }
   render();
+}
+
+function mergeStoredNotifications(items) {
+  const savedNotifications = items.map((item) => ({
+    id: `server:${item.id}`,
+    backendId: Number(item.id),
+    date: new Date(item.created_at),
+    title: item.title,
+    detail: item.message,
+    tone: item.type === 'certificate_earned' ? 'mint' : 'lavender',
+    isRead: Boolean(item.read_at),
+    link: item.link || '',
+  }));
+  state.notifications = [
+    ...savedNotifications,
+    ...state.notifications.filter((item) => !item.backendId),
+  ].sort((a, b) => b.date - a.date);
+}
+
+async function refreshStoredNotifications() {
+  const notifications = await apiCall('/notifications');
+  if (!Array.isArray(notifications)) return false;
+  mergeStoredNotifications(notifications);
+  return true;
 }
 
 function releaseLessonPdf() {
@@ -289,6 +331,7 @@ async function refreshCertificates(showNewCertificate = false) {
   if (showNewCertificate) {
     const earned = state.certificates.find((certificate) => !previousIds.has(String(certificate.id)));
     if (earned) notify(`Congratulations! You earned a certificate for ${earned.subject_name}. View it in your profile.`);
+    await refreshStoredNotifications();
   }
   return true;
 }
@@ -434,6 +477,17 @@ async function loadBackendState() {
       tone: 'peach',
     })),
   ].sort((a, b) => b.date - a.date);
+  const [notificationsLoaded, notificationPreferences] = await Promise.all([
+    refreshStoredNotifications(),
+    apiCall('/notification-preferences'),
+  ]);
+  if (!notificationsLoaded) state.notifications = state.notifications.filter((item) => !item.backendId);
+  if (notificationPreferences) {
+    state.notificationPreferences = {
+      email_certificates: Boolean(notificationPreferences.email_certificates),
+      email_content_updates: Boolean(notificationPreferences.email_content_updates),
+    };
+  }
   const isAdmin = canManageContent();
   let currentRoute = route();
   if (state.user?.role === 'teacher_pending' && currentRoute !== 'teacher-application') {
@@ -664,10 +718,14 @@ function notificationsPage() {
   const action = unreadCount
     ? '<button class="button button-outline" data-action="mark-all-notifications-read">Mark all as read</button>'
     : '';
-  return shell(`${heading('A FEW THINGS FOR YOU', 'Notifications', 'Upcoming sessions and completed quiz attempts.', action)}<div class="notification-list">${state.notifications.map((item) => {
-    const isRead = state.readNotificationIds.includes(item.id);
-    return `<button type="button" class="panel notification-card ${isRead ? 'is-read' : 'is-unread'}" data-action="read-notification" data-id="${escapeHtml(item.id)}" aria-label="${isRead ? 'Read' : 'Unread'} notification: ${escapeHtml(item.title)}"><span class="notification-mark ${item.tone}">${icon('bell')}</span><span class="notification-copy"><small>${item.date.toLocaleString()}</small><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail)}</span></span><span class="notification-status">${isRead ? 'Read' : 'Unread'}</span></button>`;
-  }).join('') || '<div class="panel empty-panel"><h2>You’re all caught up</h2><p>New scheduled sessions and quiz results will appear here.</p></div>'}</div>`, 'Notifications', 'notifications');
+  return shell(`${heading('A FEW THINGS FOR YOU', 'Notifications', 'Updates about your learning and study schedule.', action)}<div class="notification-layout"><div class="notification-list">${state.notifications.map((item) => {
+    const isRead = item.isRead || state.readNotificationIds.includes(item.id);
+    const content = `<span class="notification-mark ${item.tone}">${icon('bell')}</span><span class="notification-copy"><small>${item.date.toLocaleString()}</small><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail)}</span></span><span class="notification-status">${isRead ? 'Read' : 'Unread'}</span>`;
+    const attrs = `class="panel notification-card ${isRead ? 'is-read' : 'is-unread'}" data-action="read-notification" data-id="${escapeHtml(item.id)}" aria-label="${isRead ? 'Read' : 'Unread'} notification: ${escapeHtml(item.title)}"`;
+    return item.link
+      ? `<a ${attrs} href="${escapeHtml(item.link.startsWith('#/') ? item.link : '#/notifications')}">${content}</a>`
+      : `<button type="button" ${attrs}>${content}</button>`;
+  }).join('') || '<div class="panel empty-panel"><h2>You’re all caught up</h2><p>New schedule reminders and learning updates will appear here.</p></div>'}</div><form class="panel notification-settings" id="notification-preferences"><div class="eyebrow">EMAIL PREFERENCES</div><h2>Choose your StudyNest emails</h2><p>Important learning updates can also arrive in your inbox.</p><label class="notification-preference"><span><b>Certificates</b><small>Get an email when you earn a certificate.</small></span><input type="checkbox" name="email_certificates" ${state.notificationPreferences.email_certificates ? 'checked' : ''} /></label><label class="notification-preference"><span><b>New subject content</b><small>Get an email when a new topic or lesson is added to a subject you’ve studied or favorited.</small></span><input type="checkbox" name="email_content_updates" ${state.notificationPreferences.email_content_updates ? 'checked' : ''} /></label><button class="button button-primary button-small" type="submit">Save email settings</button></form></div>`, 'Notifications', 'notifications');
 }
 
 function subjectsPage() {
@@ -1229,6 +1287,22 @@ app.addEventListener('submit', async (event) => {
   if (!form.reportValidity()) return;
   const finishLoading = beginLoading();
   try {
+  if (form.id === 'notification-preferences') {
+    const formValues = new FormData(form);
+    const preferences = {
+      email_certificates: formValues.has('email_certificates'),
+      email_content_updates: formValues.has('email_content_updates'),
+    };
+    const result = await apiCall('/notification-preferences', {
+      method: 'PUT',
+      body: JSON.stringify(preferences),
+    });
+    if (!result) return;
+    state.notificationPreferences = preferences;
+    render();
+    notify('Your email notification settings have been saved.');
+    return;
+  }
   if (form.id === 'teacher-id-resubmit-form') {
     const result = await apiCall('/auth/teacher-id-photo', {
       method: 'POST',
@@ -1499,9 +1573,12 @@ app.addEventListener('click', async (event) => {
   const finishLoading = beginLoading();
   try {
   if (action === 'read-notification') {
-    markNotificationAsRead(id);
+    const destination = button instanceof HTMLAnchorElement ? button.getAttribute('href') : null;
+    if (destination) event.preventDefault();
+    await markNotificationAsRead(id);
+    if (destination) location.hash = destination;
   } else if (action === 'mark-all-notifications-read') {
-    markAllNotificationsAsRead();
+    await markAllNotificationsAsRead();
   } else if (action === 'download-report') {
     downloadReport(button.dataset.report, button.dataset.kind || '');
   } else if (action === 'resend-otp') {
@@ -1787,6 +1864,11 @@ app.addEventListener('load', (event) => {
 window.addEventListener('hashchange', () => {
   document.querySelector('.modal-backdrop')?.remove();
   render();
+  if (route() === 'notifications' && state.user) {
+    refreshStoredNotifications().then((loaded) => {
+      if (loaded && route() === 'notifications') render();
+    });
+  }
 });
 
 render();
