@@ -203,6 +203,10 @@ h1, h2, h3 { color: var(--ink); font-family: "Manrope", sans-serif; }
 .search-field input { width: 100%; border: 0; outline: 0; background: transparent; color: #526059; font-size: 10px; }
 .filter-bar select, .select-label { height: 38px; padding: 0 10px; border: 1px solid #e7ebe6; border-radius: 7px; background: #fff; color: #738077; font-size: 10px; }
 .lesson-list { display: grid; gap: 10px; }
+.lesson-topic-group { margin: 18px 0 24px; }
+.lesson-topic-group > .section-title { margin-bottom: 12px; }
+.lesson-topic-group > .section-title h2 { margin: 4px 0; font-size: 15px; }
+.lesson-topic-group > .section-title p { margin: 5px 0 0; color: #78867e; font-size: 10px; }
 .lesson-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; }
 .lesson-icon { display: grid; place-items: center; width: 43px; height: 43px; flex: 0 0 auto; border-radius: 10px; font-size: 21px; }
 .lesson-icon.mint, .quiz-badge.mint { background: var(--mint); color: #557e66; }

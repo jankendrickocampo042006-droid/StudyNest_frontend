@@ -48,7 +48,7 @@ const viewedPdfSyncRequests = new Set();
 let quizSession = null;
 let quizTimerInterval = null;
 let flashcardSession = null;
-let lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
+let lessonSpeech = { lessonId: null, status: 'idle', utterance: null, source: 'lesson', chunks: [], index: 0 };
 let toastTimer;
 let loadingTimer = null;
 let pendingLoadingActions = 0;
@@ -73,15 +73,17 @@ function go(path) {
 
 function updateLessonSpeechControls() {
   const supported = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
-  const currentLessonId = Number(route().match(/(?:^|\/)lesson\/(\d+)/)?.[1]);
+  const currentLessonId = Number(route().match(/(?:^|\/)lesson\/(\d+)(?:\/|$)/)?.[1]);
   const isCurrentLesson = currentLessonId && lessonSpeech.lessonId === currentLessonId;
   const status = isCurrentLesson ? lessonSpeech.status : 'idle';
   const playButton = document.querySelector('[data-action="read-lesson"]');
+  const pdfButton = document.querySelector('[data-action="read-lesson-pdf"]');
   const toggleButton = document.querySelector('[data-action="toggle-lesson-speech"]');
   const stopButton = document.querySelector('[data-action="stop-lesson-speech"]');
   const statusLabel = document.querySelector('#lesson-speech-status');
 
-  if (playButton) playButton.disabled = !supported || status === 'speaking';
+  if (playButton) playButton.disabled = !supported || status !== 'idle';
+  if (pdfButton) pdfButton.disabled = !supported || status !== 'idle';
   if (toggleButton) {
     toggleButton.disabled = !supported || status === 'idle';
     toggleButton.textContent = status === 'paused' ? 'Continue' : 'Pause';
@@ -90,7 +92,8 @@ function updateLessonSpeechControls() {
   if (statusLabel) {
     statusLabel.textContent = !supported
       ? 'Text-to-speech is not supported by this browser.'
-      : status === 'speaking' ? 'Reading lesson…'
+      : status === 'loading' ? 'Preparing PDF text…'
+        : status === 'speaking' ? `Reading ${lessonSpeech.source === 'pdf' ? 'PDF' : 'lesson'}…`
         : status === 'paused' ? 'Reading paused.'
           : 'Listen to the lesson using your device’s available voice.';
   }
@@ -100,33 +103,85 @@ function stopLessonSpeech() {
   if (lessonSpeech.utterance && 'speechSynthesis' in window) {
     window.speechSynthesis.cancel();
   }
-  lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
+  lessonSpeech = { lessonId: null, status: 'idle', utterance: null, source: 'lesson', chunks: [], index: 0 };
   updateLessonSpeechControls();
 }
 
-function readLessonAloud(lesson) {
+function splitSpeechText(text, maxLength = 1800) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const chunks = [];
+  let chunk = '';
+  words.forEach((word) => {
+    if (chunk && `${chunk} ${word}`.length > maxLength) {
+      chunks.push(chunk);
+      chunk = word;
+    } else {
+      chunk = chunk ? `${chunk} ${word}` : word;
+    }
+  });
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
+
+function speakLessonSpeechChunk(session) {
+  if (lessonSpeech !== session || session.index >= session.chunks.length) {
+    if (lessonSpeech === session) {
+      lessonSpeech = { lessonId: null, status: 'idle', utterance: null, source: 'lesson', chunks: [], index: 0 };
+      updateLessonSpeechControls();
+    }
+    return;
+  }
+  const utterance = new window.SpeechSynthesisUtterance(session.chunks[session.index]);
+  session.utterance = utterance;
+  utterance.onend = () => {
+    if (lessonSpeech !== session) return;
+    session.index += 1;
+    speakLessonSpeechChunk(session);
+  };
+  utterance.onerror = (event) => {
+    if (lessonSpeech !== session) return;
+    lessonSpeech = { lessonId: null, status: 'idle', utterance: null, source: 'lesson', chunks: [], index: 0 };
+    updateLessonSpeechControls();
+    if (!['canceled', 'interrupted'].includes(event.error)) {
+      notify('Could not read this content aloud. Try again or check your device audio settings.');
+    }
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+function readLessonAloud(lesson, text = lesson.content, source = 'lesson') {
   if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance !== 'function') {
     notify('Text-to-speech is not supported by this browser.');
     return;
   }
-  stopLessonSpeech();
-  const utterance = new window.SpeechSynthesisUtterance(`${lesson.title}. ${lesson.content}`);
-  utterance.onend = () => {
-    if (lessonSpeech.utterance !== utterance) return;
-    lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
-    updateLessonSpeechControls();
-  };
-  utterance.onerror = (event) => {
-    if (lessonSpeech.utterance !== utterance) return;
-    lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
-    updateLessonSpeechControls();
-    if (!['canceled', 'interrupted'].includes(event.error)) {
-      notify('Could not read this lesson aloud. Try again or check your device audio settings.');
-    }
-  };
-  lessonSpeech = { lessonId: lesson.id, status: 'speaking', utterance };
+  const chunks = splitSpeechText(`${lesson.title}. ${text}`);
+  if (!chunks.length) {
+    notify('There is no readable text in this lesson.');
+    return;
+  }
+  window.speechSynthesis.cancel();
+  lessonSpeech = { lessonId: lesson.id, status: 'speaking', utterance: null, source, chunks, index: 0 };
   updateLessonSpeechControls();
-  window.speechSynthesis.speak(utterance);
+  speakLessonSpeechChunk(lessonSpeech);
+}
+
+async function readLessonPdfAloud(lesson) {
+  if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance !== 'function') {
+    notify('Text-to-speech is not supported by this browser.');
+    return;
+  }
+  const pending = { lessonId: lesson.id, status: 'loading', utterance: null, source: 'pdf', chunks: [], index: 0 };
+  lessonSpeech = pending;
+  updateLessonSpeechControls();
+  const result = await apiCall(`/lessons/${encodeURIComponent(lesson.id)}/pdf/text`);
+  if (lessonSpeech !== pending) return;
+  if (!result) {
+    lessonSpeech = { lessonId: null, status: 'idle', utterance: null, source: 'lesson', chunks: [], index: 0 };
+    updateLessonSpeechControls();
+    return;
+  }
+  if (result.truncated) notify('This PDF is long; reading the first 100,000 characters only.');
+  readLessonAloud(lesson, result.text, 'pdf');
 }
 
 function notify(message) {
@@ -799,12 +854,22 @@ function subjectsPage() {
 }
 
 function lessonsPage() {
-  return shell(`${heading('ONE IDEA AT A TIME', 'Lesson library', 'Explore bite-sized lessons made for curious minds.') }<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="lesson-search" type="search" placeholder="Search lessons..." /></label><select id="lesson-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><div class="lesson-list" id="lesson-list">${lessons.map(lessonCard).join('') || '<p class="empty-state">There are no lessons yet.</p>'}</div>`, 'Lessons', 'lessons');
+  const groupedLessons = topics.map((topic) => {
+    const topicLessons = lessons.filter((lesson) => lesson.topic_id === topic.id);
+    if (!topicLessons.length) return '';
+    const subject = subjects.find((item) => item.id === topic.subject_id);
+    return `<section class="lesson-topic-group" data-topic-group><div class="section-title"><div><div class="eyebrow">${escapeHtml(subject?.name || topic.subject || 'Subject')}</div><h2>${escapeHtml(topic.title)}</h2>${topic.summary ? `<p>${escapeHtml(topic.summary)}</p>` : ''}</div><span class="tag tag-mint">${topicLessons.length} ${topicLessons.length === 1 ? 'lesson' : 'lessons'}</span></div><div class="lesson-list">${topicLessons.map((lesson) => lessonCard(lesson, subject?.id ?? null)).join('')}</div></section>`;
+  }).join('');
+  const ungroupedLessons = lessons.filter((lesson) => !topics.some((topic) => topic.id === lesson.topic_id));
+  const content = `${groupedLessons}${ungroupedLessons.map((lesson) => lessonCard(lesson)).join('')}`;
+  return shell(`${heading('ONE IDEA AT A TIME', 'Lesson library', 'Explore bite-sized lessons made for curious minds.') }<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="lesson-search" type="search" placeholder="Search lessons..." /></label><select id="lesson-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><div id="lesson-list">${content || '<p class="empty-state">There are no lessons yet.</p>'}</div>`, 'Lessons', 'lessons');
 }
 
 function lessonCard(lesson, subjectId = null) {
   const favorite = state.favorites.includes(lesson.id);
-  const lessonRoute = subjectId === null ? `lesson/${lesson.id}` : `subject/${subjectId}/lesson/${lesson.id}`;
+  const lessonTopic = topics.find((topic) => topic.id === lesson.topic_id);
+  const lessonSubjectId = subjectId ?? lessonTopic?.subject_id;
+  const lessonRoute = lessonSubjectId === undefined ? `lesson/${lesson.id}` : `subject/${lessonSubjectId}/lesson/${lesson.id}`;
   return `<article class="panel lesson-card" data-title="${escapeHtml((lesson.title + ' ' + lesson.subject + ' ' + lesson.topic).toLowerCase())}" data-subject="${escapeHtml(lesson.subject)}"><span class="lesson-icon ${subjectColor(lesson.subject)}">${subjectIcon(lesson.subject)}</span><div class="lesson-copy"><div class="eyebrow">${escapeHtml(lesson.subject)} · ${escapeHtml(lesson.topic)}</div><h3>${escapeHtml(lesson.title)}</h3><p>${escapeHtml(lesson.read)} · A friendly, focused review.</p></div><button class="favorite-button ${favorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}" aria-label="${favorite ? 'Remove favorite' : 'Add favorite'}">${favorite ? '♥' : '♡'}</button><a href="#/${lessonRoute}" class="button button-small button-outline">Read lesson →</a></article>`;
 }
 
@@ -823,16 +888,18 @@ function subjectIcon(subject) {
 function lessonDetail(id, subjectId = null) {
   const lesson = lessons.find((item) => item.id === Number(id));
   const subject = subjectId === null ? null : subjects.find((item) => item.id === Number(subjectId));
+  const lessonTopic = topics.find((item) => item.id === Number(lesson?.topic_id));
+  const lessonSubject = subject || subjects.find((item) => item.id === lessonTopic?.subject_id);
   const belongsToSubject = subject && topics.some((topic) => topic.id === Number(lesson?.topic_id) && topic.subject_id === subject.id);
   if (!lesson || (subjectId !== null && (!subject || !belongsToSubject))) return shell(`${heading('LESSON REVIEWER', 'Lesson not found', 'This lesson may have been removed.') }<a href="#/lessons" class="button button-outline">← All lessons</a>`, 'Lesson reviewer', 'lessons');
   const isFavorite = state.favorites.includes(lesson.id);
   const isRead = state.reviewedLessons.includes(lesson.id);
   const pdfUrl = `${apiBase}/api/lessons/${encodeURIComponent(lesson.id)}/pdf`;
-  const returnLink = subject
-    ? `<a href="#/subject/${subject.id}" class="button button-outline">← ${escapeHtml(subject.name)}</a>`
+  const returnLink = lessonSubject
+    ? `<a href="#/subject/${lessonSubject.id}" class="button button-outline">← ${escapeHtml(lessonSubject.name)}</a>`
     : '<a href="#/lessons" class="button button-outline">← All lessons</a>';
-  const practiceLink = subject
-    ? `<a href="#/subject/${subject.id}" class="text-link">Practice this subject →</a>`
+  const practiceLink = lessonSubject
+    ? `<a href="#/subject/${lessonSubject.id}" class="text-link">Practice this subject →</a>`
     : '<a href="#/quizzes" class="text-link">Try a practice quiz →</a>';
   const pdfResources = lesson.pdf_original_name
     ? `<section class="panel lesson-resource"><div class="resource-icon">PDF</div><div class="resource-copy"><b>${escapeHtml(lesson.pdf_original_name)}</b><small>Open the PDF here to mark this lesson as read.</small></div><div class="resource-actions"><button class="button button-outline button-small" data-action="view-lesson-pdf" data-id="${lesson.id}" ${state.pdfLoadingLessonId === lesson.id ? 'disabled aria-busy="true"' : ''}>${state.pdfLoadingLessonId === lesson.id ? 'Loading…' : state.activePdfLessonId === lesson.id && state.activePdfUrl ? 'PDF open' : 'View PDF ↗'}</button><a class="button button-primary button-small" href="${pdfUrl}?download=1">Download ↓</a></div></section>${state.pdfErrorMessage && state.activePdfLessonId === lesson.id ? `<p class="pdf-error" role="alert">${escapeHtml(state.pdfErrorMessage)}</p>` : ''}${state.activePdfLessonId === lesson.id ? `<section class="panel lesson-pdf-panel">${state.activePdfUrl ? `<iframe class="lesson-pdf-viewer" data-id="${lesson.id}" src="${state.activePdfUrl}" title="Lesson PDF: ${escapeHtml(lesson.pdf_original_name)}"></iframe><button class="text-link close-pdf-button" data-action="close-lesson-pdf">Close PDF</button>` : state.pdfLoadingLessonId === lesson.id ? '<p class="empty-state">Loading your lesson PDF…</p>' : ''}</section>` : ''}`
@@ -842,7 +909,7 @@ function lessonDetail(id, subjectId = null) {
     : lesson.pdf_original_name
       ? 'View the attached PDF to mark this lesson as read.'
       : 'This lesson is marked as read when opened.';
-  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, returnLink)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><div class="lesson-speech-controls" aria-label="Lesson audio controls"><div class="lesson-speech-buttons"><button class="button button-outline button-small" data-action="read-lesson" data-id="${lesson.id}">▶ Read lesson</button><button class="button button-outline button-small" data-action="toggle-lesson-speech" disabled>Pause</button><button class="button button-outline button-small" data-action="stop-lesson-speech" disabled>Stop</button></div><span id="lesson-speech-status" role="status" aria-live="polite"></span></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
+  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, returnLink)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><div class="lesson-speech-controls" aria-label="Lesson audio controls"><div class="lesson-speech-buttons"><button class="button button-outline button-small" data-action="read-lesson" data-id="${lesson.id}">▶ Read lesson</button>${lesson.pdf_original_name ? `<button class="button button-outline button-small" data-action="read-lesson-pdf" data-id="${lesson.id}">▶ Read PDF</button>` : ''}<button class="button button-outline button-small" data-action="toggle-lesson-speech" disabled>Pause</button><button class="button button-outline button-small" data-action="stop-lesson-speech" disabled>Stop</button></div><span id="lesson-speech-status" role="status" aria-live="polite"></span></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
 }
 
 function flashcardsPage() {
@@ -1739,6 +1806,9 @@ function filterCards() {
   document.querySelectorAll('.lesson-card').forEach((card) => {
     card.hidden = !(card.dataset.title.includes(lessonSearch) && (!lessonSubject || card.dataset.subject === lessonSubject));
   });
+  document.querySelectorAll('[data-topic-group]').forEach((group) => {
+    group.hidden = !group.querySelector('.lesson-card:not([hidden])');
+  });
   const setSearch = document.querySelector('#set-search')?.value.toLowerCase() || '';
   const setSubject = document.querySelector('#set-subject')?.value || '';
   const sets = [...document.querySelectorAll('.set-card')];
@@ -1779,6 +1849,9 @@ app.addEventListener('click', async (event) => {
   if (action === 'read-lesson') {
     const lesson = lessons.find((item) => item.id === Number(id));
     if (lesson) readLessonAloud(lesson);
+  } else if (action === 'read-lesson-pdf') {
+    const lesson = lessons.find((item) => item.id === Number(id));
+    if (lesson?.pdf_original_name) await readLessonPdfAloud(lesson);
   } else if (action === 'toggle-lesson-speech') {
     if (lessonSpeech.status === 'speaking') {
       window.speechSynthesis.pause();
