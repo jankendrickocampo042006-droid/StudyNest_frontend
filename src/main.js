@@ -48,6 +48,7 @@ const viewedPdfSyncRequests = new Set();
 let quizSession = null;
 let quizTimerInterval = null;
 let flashcardSession = null;
+let lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
 let toastTimer;
 let loadingTimer = null;
 let pendingLoadingActions = 0;
@@ -68,6 +69,64 @@ function route() {
 
 function go(path) {
   location.hash = `/${path}`;
+}
+
+function updateLessonSpeechControls() {
+  const supported = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
+  const currentLessonId = Number(route().match(/(?:^|\/)lesson\/(\d+)/)?.[1]);
+  const isCurrentLesson = currentLessonId && lessonSpeech.lessonId === currentLessonId;
+  const status = isCurrentLesson ? lessonSpeech.status : 'idle';
+  const playButton = document.querySelector('[data-action="read-lesson"]');
+  const toggleButton = document.querySelector('[data-action="toggle-lesson-speech"]');
+  const stopButton = document.querySelector('[data-action="stop-lesson-speech"]');
+  const statusLabel = document.querySelector('#lesson-speech-status');
+
+  if (playButton) playButton.disabled = !supported || status === 'speaking';
+  if (toggleButton) {
+    toggleButton.disabled = !supported || status === 'idle';
+    toggleButton.textContent = status === 'paused' ? 'Continue' : 'Pause';
+  }
+  if (stopButton) stopButton.disabled = !supported || status === 'idle';
+  if (statusLabel) {
+    statusLabel.textContent = !supported
+      ? 'Text-to-speech is not supported by this browser.'
+      : status === 'speaking' ? 'Reading lesson…'
+        : status === 'paused' ? 'Reading paused.'
+          : 'Listen to the lesson using your device’s available voice.';
+  }
+}
+
+function stopLessonSpeech() {
+  if (lessonSpeech.utterance && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+  lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
+  updateLessonSpeechControls();
+}
+
+function readLessonAloud(lesson) {
+  if (!('speechSynthesis' in window) || typeof window.SpeechSynthesisUtterance !== 'function') {
+    notify('Text-to-speech is not supported by this browser.');
+    return;
+  }
+  stopLessonSpeech();
+  const utterance = new window.SpeechSynthesisUtterance(`${lesson.title}. ${lesson.content}`);
+  utterance.onend = () => {
+    if (lessonSpeech.utterance !== utterance) return;
+    lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
+    updateLessonSpeechControls();
+  };
+  utterance.onerror = (event) => {
+    if (lessonSpeech.utterance !== utterance) return;
+    lessonSpeech = { lessonId: null, status: 'idle', utterance: null };
+    updateLessonSpeechControls();
+    if (!['canceled', 'interrupted'].includes(event.error)) {
+      notify('Could not read this lesson aloud. Try again or check your device audio settings.');
+    }
+  };
+  lessonSpeech = { lessonId: lesson.id, status: 'speaking', utterance };
+  updateLessonSpeechControls();
+  window.speechSynthesis.speak(utterance);
 }
 
 function notify(message) {
@@ -783,7 +842,7 @@ function lessonDetail(id, subjectId = null) {
     : lesson.pdf_original_name
       ? 'View the attached PDF to mark this lesson as read.'
       : 'This lesson is marked as read when opened.';
-  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, returnLink)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
+  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, returnLink)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><div class="lesson-speech-controls" aria-label="Lesson audio controls"><div class="lesson-speech-buttons"><button class="button button-outline button-small" data-action="read-lesson" data-id="${lesson.id}">▶ Read lesson</button><button class="button button-outline button-small" data-action="toggle-lesson-speech" disabled>Pause</button><button class="button button-outline button-small" data-action="stop-lesson-speech" disabled>Stop</button></div><span id="lesson-speech-status" role="status" aria-live="polite"></span></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
 }
 
 function flashcardsPage() {
@@ -1212,6 +1271,7 @@ function emailVerificationPage() {
 
 function renderLessonPage(lessonId, subjectId = null) {
   app.innerHTML = lessonDetail(lessonId, subjectId);
+  updateLessonSpeechControls();
   const lesson = lessons.find((item) => item.id === lessonId);
   if (state.user.role === 'user' && lesson && !lesson.pdf_original_name && !state.reviewedLessons.includes(lessonId)) {
     markLessonAsRead(lessonId);
@@ -1716,7 +1776,21 @@ app.addEventListener('click', async (event) => {
   const { action, id } = button.dataset;
   const finishLoading = beginLoading();
   try {
-  if (action === 'read-notification') {
+  if (action === 'read-lesson') {
+    const lesson = lessons.find((item) => item.id === Number(id));
+    if (lesson) readLessonAloud(lesson);
+  } else if (action === 'toggle-lesson-speech') {
+    if (lessonSpeech.status === 'speaking') {
+      window.speechSynthesis.pause();
+      lessonSpeech.status = 'paused';
+    } else if (lessonSpeech.status === 'paused') {
+      window.speechSynthesis.resume();
+      lessonSpeech.status = 'speaking';
+    }
+    updateLessonSpeechControls();
+  } else if (action === 'stop-lesson-speech') {
+    stopLessonSpeech();
+  } else if (action === 'read-notification') {
     const destination = button instanceof HTMLAnchorElement ? button.getAttribute('href') : null;
     if (destination) event.preventDefault();
     await markNotificationAsRead(id);
@@ -1999,6 +2073,8 @@ app.addEventListener('load', (event) => {
 }, true);
 
 window.addEventListener('hashchange', () => {
+  const nextLessonId = Number(route().match(/(?:^|\/)lesson\/(\d+)/)?.[1]) || null;
+  if (lessonSpeech.status !== 'idle' && lessonSpeech.lessonId !== nextLessonId) stopLessonSpeech();
   if (route() !== 'active-quiz') stopQuizCountdown();
   document.querySelector('.modal-backdrop')?.remove();
   render();

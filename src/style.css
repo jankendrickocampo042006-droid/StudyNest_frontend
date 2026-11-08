@@ -218,6 +218,10 @@ h1, h2, h3 { color: var(--ink); font-family: "Manrope", sans-serif; }
 .lesson-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 235px; gap: 15px; align-items: start; }
 .lesson-content { padding: 23px; }
 .lesson-toolbar { display: flex; align-items: center; justify-content: space-between; }
+.lesson-speech-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px 14px; margin: 14px 0 4px; padding: 11px 12px; border: 1px solid #e8ede8; border-radius: 8px; background: #fcfdfb; }
+.lesson-speech-buttons { display: flex; flex-wrap: wrap; gap: 7px; }
+.lesson-speech-controls [disabled] { cursor: not-allowed; opacity: .55; }
+.lesson-speech-controls > span { color: #8a968f; font-size: 9px; line-height: 1.5; }
 .lesson-content > p { color: #78867e; font-size: 12px; line-height: 1.9; }
 .lesson-content .lesson-lead { margin: 23px 0; color: #5b6b62; font-family: "Manrope", sans-serif; font-size: 16px; line-height: 1.8; }
 .lesson-read-status { margin: 15px 0 0; color: #8b7763; font-size: 11px; }
