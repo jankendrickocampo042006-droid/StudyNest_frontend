@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
+const recaptchaSiteKey = (import.meta.env.VITE_RECAPTCHA_SITE_KEY || '').trim();
+let recaptchaLoadPromise;
 
 function loadGoogleIdentityServices() {
   return new Promise((resolve, reject) => {
@@ -25,13 +27,51 @@ function loadGoogleIdentityServices() {
   });
 }
 
+function loadRecaptcha() {
+  if (window.grecaptcha?.render) return Promise.resolve(window.grecaptcha);
+  if (!recaptchaLoadPromise) {
+    recaptchaLoadPromise = new Promise((resolve, reject) => {
+      let script = document.getElementById('google-recaptcha');
+      const isNewScript = !script;
+      if (isNewScript) {
+        script = document.createElement('script');
+        script.id = 'google-recaptcha';
+        script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
+        script.async = true;
+        script.defer = true;
+      }
+
+      script.addEventListener('load', () => {
+        if (!window.grecaptcha?.ready) {
+          reject(new Error('Google reCAPTCHA did not initialize.'));
+          return;
+        }
+        window.grecaptcha.ready(() => {
+          if (window.grecaptcha?.render) resolve(window.grecaptcha);
+          else reject(new Error('Google reCAPTCHA did not initialize.'));
+        });
+      }, { once: true });
+      script.addEventListener('error', () => reject(new Error('Could not load Google reCAPTCHA.')), { once: true });
+      if (isNewScript) document.head.append(script);
+    }).catch((error) => {
+      recaptchaLoadPromise = null;
+      throw error;
+    });
+  }
+  return recaptchaLoadPromise;
+}
+
 export default function AuthApp({ route, onAuthenticate, onGoogleAuthenticate, onVerify, onResend, onForgotRequest, onPasswordReset }) {
   const [role, setRole] = useState('student');
   const [photoUrl, setPhotoUrl] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [googleError, setGoogleError] = useState('');
+  const [recaptchaError, setRecaptchaError] = useState('');
   const [googleBusy, setGoogleBusy] = useState(false);
   const googleButton = useRef(null);
+  const recaptchaWidget = useRef(null);
+  const recaptchaWidgetId = useRef(null);
+  const recaptchaToken = useRef('');
   const googleAuthHandler = useRef(onGoogleAuthenticate);
   const email = sessionStorage.getItem('studynest_pending_email') || '';
   const resetEmail = sessionStorage.getItem('studynest_password_reset_email') || '';
@@ -47,6 +87,48 @@ export default function AuthApp({ route, onAuthenticate, onGoogleAuthenticate, o
   useEffect(() => {
     setRole('student');
     setPhotoUrl('');
+  }, [route]);
+
+  useEffect(() => {
+    if (!['login', 'register', 'google-auth'].includes(route)) return undefined;
+    let cancelled = false;
+    setRecaptchaError('');
+    recaptchaToken.current = '';
+    recaptchaWidgetId.current = null;
+
+    if (!recaptchaSiteKey) {
+      setRecaptchaError('reCAPTCHA is not configured. Add VITE_RECAPTCHA_SITE_KEY to the frontend environment.');
+      return undefined;
+    }
+
+    loadRecaptcha()
+      .then((grecaptcha) => {
+        if (cancelled || !recaptchaWidget.current) return;
+        recaptchaWidgetId.current = grecaptcha.render(recaptchaWidget.current, {
+          sitekey: recaptchaSiteKey,
+          callback: (token) => {
+            recaptchaToken.current = token;
+            setRecaptchaError('');
+          },
+          'expired-callback': () => {
+            recaptchaToken.current = '';
+          },
+          'error-callback': () => {
+            recaptchaToken.current = '';
+            setRecaptchaError('reCAPTCHA could not verify this checkbox. Confirm the site key is for reCAPTCHA v2 Checkbox and allows this website domain.');
+          },
+        });
+      })
+      .catch((error) => {
+        console.error('StudyNest reCAPTCHA initialization failed:', error);
+        if (!cancelled) setRecaptchaError('Could not initialize reCAPTCHA. Confirm the v2 checkbox site key allows this website domain.');
+      });
+
+    return () => {
+      cancelled = true;
+      recaptchaToken.current = '';
+      recaptchaWidgetId.current = null;
+    };
   }, [route]);
 
   useEffect(() => {
@@ -69,8 +151,15 @@ export default function AuthApp({ route, onAuthenticate, onGoogleAuthenticate, o
               setGoogleError('Google did not return a sign-in credential. Please try again.');
               return;
             }
+            if (!recaptchaToken.current || recaptchaWidgetId.current === null) {
+              setGoogleError('Please complete the reCAPTCHA checkbox before continuing with Google.');
+              return;
+            }
+            const token = recaptchaToken.current;
+            recaptchaToken.current = '';
+            window.grecaptcha.reset(recaptchaWidgetId.current);
             setGoogleBusy(true);
-            Promise.resolve(googleAuthHandler.current(credential))
+            Promise.resolve(googleAuthHandler.current(credential, token))
               .catch(() => setGoogleError('Google sign-in did not complete. Please try again.'))
               .finally(() => setGoogleBusy(false));
           },
@@ -108,7 +197,15 @@ export default function AuthApp({ route, onAuthenticate, onGoogleAuthenticate, o
       form.elements.password_confirmation.focus();
       return;
     }
+    if (!recaptchaToken.current || recaptchaWidgetId.current === null) {
+      setRecaptchaError('Please complete the reCAPTCHA checkbox before continuing.');
+      return;
+    }
+    values.set('recaptcha_token', recaptchaToken.current);
+    recaptchaToken.current = '';
+    window.grecaptcha.reset(recaptchaWidgetId.current);
     setPasswordError('');
+    setRecaptchaError('');
     onAuthenticate(values, registering);
   }
 
@@ -223,6 +320,8 @@ export default function AuthApp({ route, onAuthenticate, onGoogleAuthenticate, o
           <label>Confirm password<input name="password_confirmation" required type="password" minLength="8" autoComplete="new-password" placeholder="Enter your password again" onChange={() => setPasswordError('')} /></label>
           {passwordError && <p className="auth-form-error" role="alert">{passwordError}</p>}
           </>}
+          <div className="recaptcha-widget" ref={recaptchaWidget}></div>
+          {recaptchaError && <p className="auth-form-error" role="alert">{recaptchaError}</p>}
           <button type="submit" className="button button-primary button-full">{registering ? 'Create my account' : 'Sign in'} <span>→</span></button>
           <div className="auth-switch">{registering ? 'Already have an account?' : 'New to StudyNest?'} <a href={`#/${registering ? 'login' : 'register'}`}>{registering ? 'Sign in' : 'Create an account'}</a></div>
           <a className="forgot-link" href="#/forgot-password">Forgot your password?</a>

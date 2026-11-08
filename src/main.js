@@ -1225,7 +1225,11 @@ async function authenticate(values, registering) {
     method: 'POST',
     body: registering
       ? values
-      : JSON.stringify({ email: values.get('email'), password: values.get('password') }),
+      : JSON.stringify({
+        email: values.get('email'),
+        password: values.get('password'),
+        recaptcha_token: values.get('recaptcha_token'),
+      }),
   });
   if (!result) return;
   if (result.requires_email_verification) {
@@ -1248,10 +1252,10 @@ async function authenticate(values, registering) {
   await loadBackendState();
 }
 
-async function authenticateWithGoogle(credential) {
+async function authenticateWithGoogle(credential, recaptchaToken) {
   const result = await apiCall('/auth/google', {
     method: 'POST',
-    body: JSON.stringify({ credential }),
+    body: JSON.stringify({ credential, recaptcha_token: recaptchaToken }),
   });
   if (!result) return;
   save('user', result.user);

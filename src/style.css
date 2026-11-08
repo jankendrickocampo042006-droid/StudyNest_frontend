@@ -481,6 +481,7 @@ td b { color: #536158; font-weight: 600; }
 .auth-form h2 { margin: 8px 0 6px; font-size: 24px; letter-spacing: -.7px; }
 .auth-form > p { margin-bottom: 25px; color: #919d95; font-size: 11px; }
 .auth-form label { margin: 14px 0; }
+.recaptcha-widget { min-height: 78px; margin: 14px 0 4px; }
 .auth-form .button-full { margin-top: 8px; }
 .auth-switch { margin-top: 18px; color: #8c9991; text-align: center; font-size: 10px; }
 .auth-switch a, .forgot-link { color: #548166; font-weight: 700; }
