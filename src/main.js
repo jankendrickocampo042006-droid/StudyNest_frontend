@@ -1316,7 +1316,7 @@ function questionFields(question = {}, index = 0) {
   const type = question.type || 'multiple_choice';
   const correct = question.correct_option || '';
   const identification = type === 'identification';
-  return `<div class="panel quiz-question-editor"><div class="form-section-title"><h3>Question ${index + 1}</h3><button type="button" class="quiet-button danger-text" data-action="remove-content-question">Remove</button></div><label>Question<textarea name="question_text" required rows="2">${escapeHtml(question.question_text || question.question || '')}</textarea></label><label>Type<select name="type" class="quiz-question-type"><option value="multiple_choice" ${type === 'multiple_choice' ? 'selected' : ''}>Multiple choice</option><option value="true_false" ${type === 'true_false' ? 'selected' : ''}>True / False</option><option value="identification" ${identification ? 'selected' : ''}>Identification</option></select></label><div class="form-grid quiz-option-fields" ${identification ? 'hidden' : ''}><label>Option A<input name="option_a" value="${escapeHtml(question.option_a || '')}" /></label><label>Option B<input name="option_b" value="${escapeHtml(question.option_b || '')}" /></label><label>Option C<input name="option_c" value="${escapeHtml(question.option_c || '')}" /></label><label>Option D<input name="option_d" value="${escapeHtml(question.option_d || '')}" /></label></div><label class="quiz-correct-select" ${identification ? 'hidden' : ''}>Correct answer<select name="correct_option" ${identification ? '' : 'required'}><option value="">Choose answer</option>${(type === 'true_false' ? ['True', 'False'] : ['A', 'B', 'C', 'D']).map((option) => `<option value="${option}" ${correct === option ? 'selected' : ''}>${option}</option>`).join('')}</select></label><label class="quiz-correct-text" ${identification ? '' : 'hidden'}>Correct answer<input name="correct_option_text" maxlength="255" value="${escapeHtml(identification ? correct : '')}" ${identification ? 'required' : ''} placeholder="Enter the expected answer" /></label><label>Explanation<textarea name="explanation" rows="2">${escapeHtml(question.explanation || '')}</textarea></label></div>`;
+  return `<div class="panel quiz-question-editor"><div class="form-section-title"><h3>Question ${index + 1}</h3><button type="button" class="quiet-button danger-text" data-action="remove-content-question">Remove</button></div><label>Question<textarea name="question_text" required rows="2">${escapeHtml(question.question_text || question.question || '')}</textarea></label><label>Type<select name="type" class="quiz-question-type" data-previous-type="${escapeHtml(type)}"><option value="multiple_choice" ${type === 'multiple_choice' ? 'selected' : ''}>Multiple choice</option><option value="true_false" ${type === 'true_false' ? 'selected' : ''}>True / False</option><option value="identification" ${identification ? 'selected' : ''}>Identification</option></select></label><div class="form-grid quiz-option-fields" ${type !== 'multiple_choice' ? 'hidden' : ''}><label>Option A<input name="option_a" value="${escapeHtml(question.option_a || '')}" /></label><label>Option B<input name="option_b" value="${escapeHtml(question.option_b || '')}" /></label><label>Option C<input name="option_c" value="${escapeHtml(question.option_c || '')}" /></label><label>Option D<input name="option_d" value="${escapeHtml(question.option_d || '')}" /></label></div><label class="quiz-correct-select" ${identification ? 'hidden' : ''}>Correct answer<select name="correct_option" ${identification ? '' : 'required'}><option value="">Choose answer</option>${(type === 'true_false' ? ['True', 'False'] : ['A', 'B', 'C', 'D']).map((option) => `<option value="${option}" ${correct === option ? 'selected' : ''}>${option}</option>`).join('')}</select></label><label class="quiz-correct-text" ${identification ? '' : 'hidden'}>Correct answer<input name="correct_option_text" maxlength="255" value="${escapeHtml(identification ? correct : '')}" ${identification ? 'required' : ''} placeholder="Enter the expected answer" /></label><label>Explanation<textarea name="explanation" rows="2">${escapeHtml(question.explanation || '')}</textarea></label></div>`;
 }
 
 function contentForm(kind, id = '', parentId = '') {
@@ -1825,6 +1825,7 @@ app.addEventListener('change', (event) => {
   if (event.target.matches('.quiz-question-type')) {
     const row = event.target.closest('.quiz-question-editor');
     const type = event.target.value;
+    const previousType = event.target.dataset.previousType;
     const choices = type === 'true_false' ? ['True', 'False'] : ['A', 'B', 'C', 'D'];
     const correctLabel = row.querySelector('.quiz-correct-select');
     const textLabel = row.querySelector('.quiz-correct-text');
@@ -1837,11 +1838,19 @@ app.addEventListener('change', (event) => {
     textLabel.hidden = !identification;
     correct.required = !identification;
     textCorrect.required = identification;
-    optionFields.hidden = identification;
-    ['option_a', 'option_b', 'option_c', 'option_d'].forEach((name) => {
-      row.querySelector(`[name="${name}"]`).disabled = type === 'true_false' && !['option_a', 'option_b'].includes(name)
-        || identification;
-    });
+    optionFields.hidden = type !== 'multiple_choice';
+    if (previousType === 'true_false' && type === 'multiple_choice') {
+      ['option_a', 'option_b', 'option_c', 'option_d'].forEach((name) => {
+        row.querySelector(`[name="${name}"]`).value = '';
+      });
+    }
+    if (type === 'true_false') {
+      row.querySelector('[name="option_a"]').value = 'True';
+      row.querySelector('[name="option_b"]').value = 'False';
+      row.querySelector('[name="option_c"]').value = '';
+      row.querySelector('[name="option_d"]').value = '';
+    }
+    event.target.dataset.previousType = type;
   }
 });
 
