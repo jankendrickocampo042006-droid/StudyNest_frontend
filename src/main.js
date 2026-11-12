@@ -1,6 +1,7 @@
 import './style.css';
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
+import QRCode from 'qrcode';
 import { apiBase, apiRequest } from './api.js';
 import AuthApp from './AuthApp.jsx';
 
@@ -69,6 +70,39 @@ function route() {
 
 function go(path) {
   location.hash = `/${path}`;
+}
+
+function shareableRoute(path) {
+  return /^(?:subject\/[1-9]\d*(?:\/lesson\/[1-9]\d*)?|lesson\/[1-9]\d*)$/.test(path) ? path : null;
+}
+
+function takeSharedRoute(user) {
+  let destination = null;
+  try {
+    destination = shareableRoute(sessionStorage.getItem('studynest_shared_route') || '');
+    sessionStorage.removeItem('studynest_shared_route');
+  } catch {
+    destination = null;
+  }
+  if (!destination || user?.role === 'teacher_pending' || canManageContent(user?.role)) return null;
+  return destination;
+}
+
+async function showQrShare(title, path) {
+  const shareUrl = new URL(`${location.pathname}${location.search}#/${path}`, location.origin).href;
+  const isLocalAddress = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+  try {
+    const qrImage = await QRCode.toDataURL(shareUrl, { width: 280, margin: 2, errorCorrectionLevel: 'M' });
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-backdrop';
+    overlay.innerHTML = `<section class="modal panel qr-share-modal" role="dialog" aria-modal="true" aria-labelledby="qr-share-title"><button type="button" class="modal-close" data-action="close-modal" aria-label="Close">×</button><div class="eyebrow">SHARE A LEARNING RESOURCE</div><h2 id="qr-share-title">${escapeHtml(title)}</h2><img class="qr-share-image" src="${qrImage}" alt="QR code linking to ${escapeHtml(title)}" /><p class="qr-share-url">${escapeHtml(shareUrl)}</p>${isLocalAddress ? '<p class="qr-share-notice" role="note">This local QR code uses localhost and generally only works on this computer. Use the deployed Render page to create a QR code that other devices can open.</p>' : ''}<div class="form-actions"><button type="button" class="button button-outline" data-action="copy-share-link" data-url="${escapeHtml(shareUrl)}">Copy link</button><a class="button button-primary" href="${qrImage}" download="studynest-qr.png">Download QR</a></div></section>`;
+    document.querySelector('.modal-backdrop')?.remove();
+    app.append(overlay);
+    overlay.querySelector('[data-action="close-modal"]').focus();
+  } catch (error) {
+    console.error('Unable to generate the share QR code.', error);
+    notify('Could not generate the QR code. Please try again.');
+  }
 }
 
 function updateLessonSpeechControls() {
@@ -612,7 +646,7 @@ async function loadBackendState() {
     return true;
   }
   if (state.user && ['login', 'register', 'google-auth'].includes(currentRoute)) {
-    currentRoute = isAdmin ? 'manage-content' : 'dashboard';
+    currentRoute = takeSharedRoute(state.user) || (isAdmin ? 'manage-content' : 'dashboard');
     go(currentRoute);
   }
   const managementRoute = currentRoute === 'manage-content' || currentRoute.startsWith('manage-');
@@ -778,7 +812,8 @@ function subjectDetail(id) {
   const certificateInfo = subject.certificate_enabled
     ? `<div class="soft-banner"><span>✳</span><div><b>Certificate available</b><small>Complete at least ${subject.required_completion_percent}% of this subject’s lessons${subject.quizzes ? ` and score at least ${subject.minimum_quiz_score}% on each quiz` : ''} to earn it.</small></div></div>`
     : '<div class="soft-banner"><span>♡</span><div><b>No certificate for this subject</b><small>The subject owner has not enabled completion certificates.</small></div></div>';
-  return shell(`${heading(escapeHtml(subject.name.toUpperCase()), escapeHtml(subject.name), escapeHtml(subject.description || 'Explore the topics, lessons, and practice available in this subject.'), '<a href="#/subjects" class="button button-outline">← All subjects</a>')}${certificateInfo}<div class="topic-list">${subjectTopics.map((topic, index) => {
+  const headingActions = `<div class="page-heading-actions"><button class="button button-primary" data-action="share-qr" data-title="${escapeHtml(subject.name)}" data-route="subject/${subject.id}">Share QR code</button><a href="#/subjects" class="button button-outline">← All subjects</a></div>`;
+  return shell(`${heading(escapeHtml(subject.name.toUpperCase()), escapeHtml(subject.name), escapeHtml(subject.description || 'Explore the topics, lessons, and practice available in this subject.'), headingActions)}${certificateInfo}<div class="topic-list">${subjectTopics.map((topic, index) => {
     const topicLessons = lessons.filter((lesson) => Number(lesson.topic_id) === topic.id);
     const topicQuizzes = quizzes.filter((quiz) => Number(quiz.topic_id) === topic.id);
     const completedLessons = topicLessons.filter((lesson) => state.reviewedLessons.includes(lesson.id)).length;
@@ -909,7 +944,9 @@ function lessonDetail(id, subjectId = null) {
     : lesson.pdf_original_name
       ? 'View the attached PDF to mark this lesson as read.'
       : 'This lesson is marked as read when opened.';
-  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, returnLink)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><div class="lesson-speech-controls" aria-label="Lesson audio controls"><div class="lesson-speech-buttons"><button class="button button-outline button-small" data-action="read-lesson" data-id="${lesson.id}">▶ Read lesson</button>${lesson.pdf_original_name ? `<button class="button button-outline button-small" data-action="read-lesson-pdf" data-id="${lesson.id}">▶ Read PDF</button>` : ''}<button class="button button-outline button-small" data-action="toggle-lesson-speech" disabled>Pause</button><button class="button button-outline button-small" data-action="stop-lesson-speech" disabled>Stop</button></div><span id="lesson-speech-status" role="status" aria-live="polite"></span></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
+  const lessonRoute = subjectId === null ? `lesson/${lesson.id}` : `subject/${subject.id}/lesson/${lesson.id}`;
+  const shareButton = `<button class="button button-outline button-small" data-action="share-qr" data-title="${escapeHtml(lesson.title)}" data-route="${lessonRoute}">Share QR code</button>`;
+  return shell(`${heading(escapeHtml(lesson.subject.toUpperCase()), escapeHtml(lesson.title), `${escapeHtml(lesson.topic)} · ${lesson.read}`, `<div class="page-heading-actions">${shareButton}${returnLink}</div>`)}${pdfResources}<div class="lesson-detail-layout"><article class="panel lesson-content"><div class="lesson-toolbar"><span class="tag tag-mint">LESSON REVIEWER</span><button class="favorite-button ${isFavorite ? 'favorited' : ''}" data-action="favorite" data-id="${lesson.id}">${isFavorite ? '♥ Saved' : '♡ Save lesson'}</button></div><div class="lesson-speech-controls" aria-label="Lesson audio controls"><div class="lesson-speech-buttons"><button class="button button-outline button-small" data-action="read-lesson" data-id="${lesson.id}">▶ Read lesson</button>${lesson.pdf_original_name ? `<button class="button button-outline button-small" data-action="read-lesson-pdf" data-id="${lesson.id}">▶ Read PDF</button>` : ''}<button class="button button-outline button-small" data-action="toggle-lesson-speech" disabled>Pause</button><button class="button button-outline button-small" data-action="stop-lesson-speech" disabled>Stop</button></div><span id="lesson-speech-status" role="status" aria-live="polite"></span></div><p class="lesson-read-status ${isRead ? 'is-read' : ''}" data-lesson-read-status="${lesson.id}">${readStatus}</p><p class="lesson-lead">${escapeHtml(lesson.content)}</p><h2>The key idea</h2><p>${escapeHtml(lesson.content)} Learning this one concept at a time helps build a clearer picture of how it all fits together.</p><div class="takeaway"><span>✳</span><div><b>Keep this in mind</b><p>Try explaining the idea in your own words. That’s a great way to make it stick.</p></div></div><div class="lesson-actions">${practiceLink}</div></article><aside class="panel toc-panel"><div class="eyebrow">IN THIS LESSON</div><h3>A quick guide</h3><a class="toc-link current" href="#lesson-overview">Overview</a><a class="toc-link" href="#lesson-key-idea">The key idea</a><a class="toc-link" href="#lesson-takeaway">Takeaway</a></aside></div>`, 'Lesson reviewer', 'lessons');
 }
 
 function flashcardsPage() {
@@ -1387,6 +1424,14 @@ function render() {
   }
   const isManagementRoute = current === 'manage-content' || current.startsWith('manage-');
   if (!state.user) {
+    const sharedRoute = shareableRoute(current);
+    if (sharedRoute) {
+      try {
+        sessionStorage.setItem('studynest_shared_route', sharedRoute);
+      } catch {
+        notify('This browser could not save the shared destination. You can still open the link after signing in.');
+      }
+    }
     go('login');
     return;
   } else if (state.user.role === 'teacher_pending') app.innerHTML = teacherApplicationPage();
@@ -1460,9 +1505,9 @@ async function authenticate(values, registering) {
     return;
   }
   save('user', result.user);
-  go(state.user?.role === 'teacher_pending'
+  go(takeSharedRoute(state.user) || (state.user?.role === 'teacher_pending'
     ? 'teacher-application'
-    : canManageContent(state.user?.role) ? 'manage-content' : 'dashboard');
+    : canManageContent(state.user?.role) ? 'manage-content' : 'dashboard'));
   render();
   notify(registering
     ? values.get('role') === 'teacher' ? 'Email verified. Your teacher application is awaiting administrator review.' : 'Your StudyNest account is ready.'
@@ -1479,9 +1524,9 @@ async function authenticateWithGoogle(credential, recaptchaToken) {
   });
   if (!result) return;
   save('user', result.user);
-  go(state.user?.role === 'teacher_pending'
+  go(takeSharedRoute(state.user) || (state.user?.role === 'teacher_pending'
     ? 'teacher-application'
-    : canManageContent(state.user?.role) ? 'manage-content' : 'dashboard');
+    : canManageContent(state.user?.role) ? 'manage-content' : 'dashboard'));
   render();
   notify('Welcome to your StudyNest learning space.');
   await loadBackendState();
@@ -1846,7 +1891,36 @@ app.addEventListener('click', async (event) => {
   const { action, id } = button.dataset;
   const finishLoading = beginLoading();
   try {
-  if (action === 'read-lesson') {
+  if (action === 'share-qr') {
+    const destination = shareableRoute(button.dataset.route || '');
+    if (!destination) {
+      notify('This page cannot be shared as a QR code.');
+      return;
+    }
+    await showQrShare(button.dataset.title || 'StudyNest resource', destination);
+  } else if (action === 'copy-share-link') {
+    const shareUrl = button.dataset.url || '';
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = shareUrl;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.append(input);
+        input.select();
+        const copied = document.execCommand('copy');
+        input.remove();
+        if (!copied) throw new Error('The browser did not allow copying the link.');
+      }
+      notify('Link copied to clipboard.');
+    } catch (error) {
+      console.error('Unable to copy the share link.', error);
+      notify('Could not copy the link. You can select and copy it from the dialog.');
+    }
+  } else if (action === 'read-lesson') {
     const lesson = lessons.find((item) => item.id === Number(id));
     if (lesson) readLessonAloud(lesson);
   } else if (action === 'read-lesson-pdf') {
