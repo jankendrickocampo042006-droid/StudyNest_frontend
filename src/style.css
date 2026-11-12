@@ -729,3 +729,195 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .private-content-row { flex-direction: column; }
   .certificate-card { align-items: flex-start; flex-direction: column; }
 }
+
+/* Small visual responses make the existing controls feel more tactile. */
+body {
+  background:
+    radial-gradient(ellipse at 92% 3%, #f8eef0 0, transparent 34rem),
+    #faf8f8;
+}
+
+.main-area {
+  background: linear-gradient(180deg, #fffafa 0, #faf8f8 260px);
+}
+
+.topbar {
+  background: rgba(255, 253, 253, .86);
+  backdrop-filter: blur(14px);
+}
+
+.brand-mark,
+.avatar,
+.profile-avatar,
+.subject-icon,
+.lesson-icon,
+.metric-icon,
+.notification-mark,
+.certificate-mark {
+  transition: transform .22s ease, box-shadow .22s ease, background-color .22s ease;
+}
+
+.nav-item {
+  position: relative;
+  transition: color .18s ease, background-color .18s ease, transform .18s ease;
+}
+
+.nav-item.active::before {
+  position: absolute;
+  inset: 9px auto 9px 0;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: currentColor;
+  content: "";
+}
+
+.button,
+.icon-button,
+.subject-favorite-button,
+.favorite-button,
+.question-numbers button,
+.answer-option,
+.mobile-menu {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background-color .18s ease, color .18s ease;
+}
+
+.button:not(:disabled):active,
+.icon-button:active,
+.subject-favorite-button:active,
+.favorite-button:active,
+.question-numbers button:active,
+.answer-option:active,
+.mobile-menu:active {
+  transform: scale(.97);
+}
+
+.metric-card,
+.subject-card,
+.lesson-card,
+.quiz-card,
+.set-card,
+.certificate-card,
+.schedule-panel,
+.admin-library-card,
+.private-subject-card {
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+
+.progress-line {
+  overflow: hidden;
+}
+
+.progress-line span {
+  transition: width .45s ease, filter .2s ease;
+}
+
+.search-field,
+.filter-bar select,
+.form-panel input,
+.form-panel textarea,
+.form-panel select,
+.auth-form input:not([type="checkbox"]):not([type="file"]),
+.auth-form select,
+.profile-form input,
+.profile-form textarea,
+.profile-form select {
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+.search-field:focus-within,
+.filter-bar select:focus-visible,
+.form-panel input:focus,
+.form-panel textarea:focus,
+.form-panel select:focus,
+.auth-form input:focus,
+.auth-form select:focus,
+.profile-form input:focus,
+.profile-form textarea:focus,
+.profile-form select:focus {
+  border-color: #bd8490;
+  box-shadow: 0 0 0 4px #f5e8eb;
+}
+
+.soft-banner,
+.streak-card,
+.topic-step,
+.lesson-speech-controls,
+.quiz-timer,
+.schedule-note {
+  transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+}
+
+.modal-backdrop {
+  animation: ui-backdrop-in .18s ease both;
+}
+
+.modal {
+  animation: ui-modal-in .22s cubic-bezier(.2, .75, .25, 1) both;
+}
+
+@keyframes ui-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (hover: none) {
+  .button:not(:disabled):active,
+  .icon-button:active,
+  .subject-favorite-button:active,
+  .favorite-button:active,
+  .question-numbers button:active,
+  .answer-option:active,
+  .mobile-menu:active { transform: scale(.97); }
+}
+
+@media (hover: hover) {
+  .brand:hover .brand-mark,
+  .user-chip:hover .avatar { transform: translateY(-2px) rotate(-4deg); box-shadow: 0 6px 14px #4d17241c; }
+  .nav-item:hover { transform: translateX(3px); }
+  .button:not(:disabled):hover,
+  .icon-button:hover,
+  .subject-favorite-button:hover,
+  .favorite-button:hover,
+  .question-numbers button:hover,
+  .answer-option:hover,
+  .mobile-menu:hover { transform: translateY(-2px); }
+  .button-primary:not(:disabled):hover { box-shadow: 0 8px 18px #7628382b; }
+  .button-outline:not(:disabled):hover { box-shadow: 0 5px 13px #39242a0d; }
+  .metric-card:hover,
+  .subject-card:hover,
+  .lesson-card:hover,
+  .quiz-card:hover,
+  .set-card:hover,
+  .certificate-card:hover,
+  .admin-library-card:hover,
+  .private-subject-card:hover {
+    transform: translateY(-3px);
+    border-color: #e5cbd1;
+    box-shadow: 0 12px 28px #4d17240d;
+  }
+  .subject-card:hover .subject-icon,
+  .lesson-card:hover .lesson-icon,
+  .metric-card:hover .metric-icon,
+  .certificate-card:hover .certificate-mark { transform: scale(1.06) rotate(-3deg); }
+  .subject-card:hover .progress-line span { filter: saturate(1.2); }
+  .soft-banner:hover,
+  .streak-card:hover,
+  .topic-step:hover,
+  .schedule-note:hover { border-color: #ead7dc; box-shadow: 0 8px 22px #4d172408; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
