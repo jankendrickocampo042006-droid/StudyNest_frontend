@@ -198,6 +198,10 @@ h1, h2, h3 { color: var(--ink); font-family: "Manrope", sans-serif; }
 .soft-banner small { margin-top: 4px; color: #99a39d; font-size: 9px; }
 .soft-banner .button { margin-left: auto; }
 .filter-bar { display: flex; align-items: center; gap: 9px; margin: 19px 0 14px; }
+.search-control { display: flex; align-items: center; gap: 8px; width: min(430px, 100%); }
+.search-control .search-field { flex: 1; min-width: 0; width: auto; }
+.search-control .button { flex: 0 0 auto; white-space: nowrap; }
+.filter-status { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
 .search-field { display: flex; align-items: center; gap: 8px; width: min(350px, 100%); height: 38px; padding: 0 11px; border: 1px solid #e7ebe6; border-radius: 7px; background: #fff; color: #9ba69f; }
 .search-field span { font-size: 20px; }
 .search-field input { width: 100%; border: 0; outline: 0; background: transparent; color: #526059; font-size: 10px; }
@@ -552,6 +556,8 @@ td b { color: #536158; font-weight: 600; }
   .subject-card h3 { min-height: auto; }
   .studyset-grid { grid-template-columns: 1fr; }
   .filter-bar { flex-wrap: wrap; }
+  .filter-bar .search-control { flex: 1 1 100%; width: 100%; }
+  .filter-bar .search-control .search-field { flex: 1; width: auto; }
   .search-field { flex: 1 1 100%; }
   .filter-bar select { flex: 1; }
   .lesson-card { flex-wrap: wrap; gap: 10px; }
@@ -650,6 +656,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .admin-list-toolbar b { color: #432b31; font-size: 12px; }
 .admin-list-toolbar small { margin-top: 5px; color: #97898d; font-size: 10px; }
 .admin-list-toolbar .search-field { width: min(320px, 48%); }
+.admin-list-toolbar .search-control { width: min(430px, 58%); }
+.admin-list-toolbar .search-control .search-field { flex: 1; width: auto; }
 .admin-record-list { display: grid; }
 .admin-record-row { min-width: 0; display: flex; align-items: center; gap: 14px; padding: 15px 2px; border-bottom: 1px solid #f1ebec; transition: background .15s ease; }
 .admin-record-row:last-child { border-bottom: 0; }
@@ -687,7 +695,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .admin-quick-links { grid-template-columns: 1fr; gap: 9px; margin-top: 20px; }
   .admin-section-panel { padding: 0 14px; }
   .admin-list-toolbar { align-items: stretch; flex-direction: column; padding: 15px 0; }
-  .admin-list-toolbar .search-field { width: 100%; }
+  .admin-list-toolbar .search-control { width: 100%; }
+  .admin-list-toolbar .search-control .search-field { width: auto; }
   .admin-record-row { gap: 10px; padding: 13px 0; }
   .admin-record-icon { width: 34px; height: 34px; }
   .admin-content-actions { gap: 2px; }

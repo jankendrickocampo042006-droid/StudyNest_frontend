@@ -796,6 +796,10 @@ function heading(eyebrow, title, subtitle, action = '') {
   return `<div class="page-heading"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p>${subtitle}</p></div>${action}</div>`;
 }
 
+function searchControl(id, placeholder, label, value = '') {
+  return `<div class="search-control" role="search"><label class="search-field"><span aria-hidden="true">⌕</span><input id="${escapeHtml(id)}" type="search" aria-label="${escapeHtml(label)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" /></label><button class="button button-primary button-small" type="button" data-action="apply-search" data-search-target="${escapeHtml(id)}">Search</button></div>`;
+}
+
 function metric(label, value, detail, tone = 'mint', iconText = '↗') {
   return `<article class="metric-card ${tone}"><div class="metric-top"><span>${label}</span><span class="metric-icon">${iconText}</span></div><strong>${value}</strong><small>${detail}</small></article>`;
 }
@@ -897,7 +901,7 @@ function lessonsPage() {
   }).join('');
   const ungroupedLessons = lessons.filter((lesson) => !topics.some((topic) => topic.id === lesson.topic_id));
   const content = `${groupedLessons}${ungroupedLessons.map((lesson) => lessonCard(lesson)).join('')}`;
-  return shell(`${heading('ONE IDEA AT A TIME', 'Lesson library', 'Explore bite-sized lessons made for curious minds.') }<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="lesson-search" type="search" placeholder="Search lessons..." /></label><select id="lesson-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><div id="lesson-list">${content || '<p class="empty-state">There are no lessons yet.</p>'}</div>`, 'Lessons', 'lessons');
+  return shell(`${heading('ONE IDEA AT A TIME', 'Lesson library', 'Explore bite-sized lessons made for curious minds.') }<div class="filter-bar">${searchControl('lesson-search', 'Search lessons...', 'Search lessons')}<select id="lesson-subject" aria-label="Filter lessons by subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><p class="filter-status" id="lesson-filter-status" role="status" aria-live="polite" hidden></p><div id="lesson-list">${content || '<p class="empty-state">There are no lessons yet.</p>'}</div>`, 'Lessons', 'lessons');
 }
 
 function lessonCard(lesson, subjectId = null) {
@@ -951,7 +955,7 @@ function lessonDetail(id, subjectId = null) {
 
 function flashcardsPage() {
   const search = new URLSearchParams(location.hash.split('?')[1] || '').get('q') || '';
-  return shell(`${heading('KEEP THE GOOD STUFF CLOSE', 'My study sets', 'Create a set, add a few cards, and learn at your pace.', '<a href="#/flashcards/create" class="button button-primary">＋ Create a study set</a>')}<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="set-search" type="search" value="${escapeHtml(search)}" placeholder="Search your sets..." /></label><select id="set-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${s.name}</option>`).join('')}</select><select id="set-sort"><option value="newest">Recently created</option><option value="az">Title: A to Z</option><option value="cards">Most cards</option></select></div><div class="studyset-grid" id="studyset-grid">${state.sets.map(setCard).join('')}</div>`, 'My study sets', 'flashcards');
+  return shell(`${heading('KEEP THE GOOD STUFF CLOSE', 'My study sets', 'Create a set, add a few cards, and learn at your pace.', '<a href="#/flashcards/create" class="button button-primary">＋ Create a study set</a>')}<div class="filter-bar">${searchControl('set-search', 'Search your sets...', 'Search study sets', search)}<select id="set-subject" aria-label="Filter study sets by subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select><select id="set-sort" aria-label="Sort study sets"><option value="newest">Recently created</option><option value="az">Title: A to Z</option><option value="cards">Most cards</option></select></div><p class="filter-status" id="set-filter-status" role="status" aria-live="polite" hidden></p><div class="studyset-grid" id="studyset-grid">${state.sets.map(setCard).join('')}</div>`, 'My study sets', 'flashcards');
 }
 
 function privateLibraryPage() {
@@ -994,10 +998,10 @@ function privateLibraryForm(kind, id = '') {
   app.append(overlay);
 }
 
-function setCard(set) {
+function setCard(set, index) {
   const created = set.created_at ? new Date(set.created_at).toLocaleDateString() : '';
   const pdfLink = set.pdf_original_name ? `<div class="private-pdf-actions"><a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf" class="text-link" target="_blank" rel="noopener">Open attached PDF ↗</a><a href="${apiBase}/api/study-sets/${encodeURIComponent(set.id)}/pdf?download=1" class="text-link">Download PDF ↓</a></div>` : '';
-  return `<article class="panel set-card" data-title="${escapeHtml(`${set.title} ${set.subject}`.toLowerCase())}" data-subject="${escapeHtml(set.subject || '')}" data-cards="${set.cards.length}"><div class="set-art ${subjectColor(set.subject || '')}"><span>${subjectIcon(set.subject || '')}</span><small>${escapeHtml((set.subject || 'MY STUDY SET').toUpperCase())}</small></div><div class="set-card-body"><span class="eyebrow">${escapeHtml(set.topic || set.subject || 'MY STUDY SET')}</span><h3>${escapeHtml(set.title)}</h3><p>${escapeHtml(set.description || '')}</p><div class="set-meta"><span>▣ ${set.cards.length} cards</span><span>${created ? `Created ${escapeHtml(created)}` : ''}</span></div>${pdfLink}<div class="set-actions"><a href="#/study/${encodeURIComponent(set.id)}" class="button button-primary button-small">Study set →</a><a href="#/flashcards/edit/${encodeURIComponent(set.id)}" class="button button-outline button-small">Edit</a><button class="icon-text danger-text" data-action="delete-set" data-id="${escapeHtml(set.id)}">Delete</button></div></div></article>`;
+  return `<article class="panel set-card" data-title="${escapeHtml(`${set.title} ${set.subject}`.toLowerCase())}" data-subject="${escapeHtml(set.subject || '')}" data-cards="${set.cards.length}" data-created-at="${escapeHtml(set.created_at || '')}" data-original-order="${index}"><div class="set-art ${subjectColor(set.subject || '')}"><span>${subjectIcon(set.subject || '')}</span><small>${escapeHtml((set.subject || 'MY STUDY SET').toUpperCase())}</small></div><div class="set-card-body"><span class="eyebrow">${escapeHtml(set.topic || set.subject || 'MY STUDY SET')}</span><h3>${escapeHtml(set.title)}</h3><p>${escapeHtml(set.description || '')}</p><div class="set-meta"><span>▣ ${set.cards.length} cards</span><span>${created ? `Created ${escapeHtml(created)}` : ''}</span></div>${pdfLink}<div class="set-actions"><a href="#/study/${encodeURIComponent(set.id)}" class="button button-primary button-small">Study set →</a><a href="#/flashcards/edit/${encodeURIComponent(set.id)}" class="button button-outline button-small">Edit</a><button class="icon-text danger-text" data-action="delete-set" data-id="${escapeHtml(set.id)}">Delete</button></div></div></article>`;
 }
 
 function flashcardForm(id) {
@@ -1026,7 +1030,7 @@ function studyPage(id) {
 }
 
 function quizzesPage() {
-  return shell(`${heading('A QUICK CHECK-IN', 'Practice quizzes', 'Take your time. This is a space to learn, not to rush.') }<div class="filter-bar"><label class="search-field"><span>⌕</span><input id="quiz-search" type="search" placeholder="Find a quiz..." /></label><select id="quiz-subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><div class="quiz-grid" id="quiz-grid">${quizzes.map((quiz) => quizCard(quiz)).join('') || '<p class="empty-state">No quizzes are available yet.</p>'}</div><a class="text-link history-link" href="#/history">View your quiz history →</a>`, 'Practice quizzes', 'quizzes');
+  return shell(`${heading('A QUICK CHECK-IN', 'Practice quizzes', 'Take your time. This is a space to learn, not to rush.') }<div class="filter-bar">${searchControl('quiz-search', 'Find a quiz...', 'Search quizzes')}<select id="quiz-subject" aria-label="Filter quizzes by subject"><option value="">All subjects</option>${subjects.map((s) => `<option>${escapeHtml(s.name)}</option>`).join('')}</select></div><p class="filter-status" id="quiz-filter-status" role="status" aria-live="polite" hidden></p><div class="quiz-grid" id="quiz-grid">${quizzes.map((quiz) => quizCard(quiz)).join('') || '<p class="empty-state">No quizzes are available yet.</p>'}</div><a class="text-link history-link" href="#/history">View your quiz history →</a>`, 'Practice quizzes', 'quizzes');
 }
 
 function quizCard(quiz) {
@@ -1222,7 +1226,7 @@ function managementPage() {
       <span class="admin-record-icon">${icon('settings')}</span><div class="admin-content-copy"><b>${escapeHtml(teacher.name)}</b><small>${escapeHtml(teacher.email)}${teacher.teacher_id ? ` · ID: ${escapeHtml(teacher.teacher_id)}` : ''}</small></div><span class="role-badge">Teacher</span>
     </article>`).join('') || '<div class="admin-empty"><p>No teacher accounts yet. Add a teacher to share responsibility for the learning catalog.</p></div>'}</div>`;
     return shell(`${heading('PEOPLE & ACCESS', 'Teachers', 'Manage the teachers who can create and maintain learning content.', '<div class="page-heading-actions"><button class="button button-outline" data-action="download-report" data-report="teachers">Download CSV ↓</button><button class="button button-primary" data-action="new-teacher">＋ Add teacher</button></div>')}
-      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Teacher accounts</b><small>${teachers.length} active ${teachers.length === 1 ? 'teacher' : 'teachers'}</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search teachers" placeholder="Search teachers..." /></label></div>${body}</section>`,
+      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Teacher accounts</b><small>${teachers.length} active ${teachers.length === 1 ? 'teacher' : 'teachers'}</small></div>${searchControl('admin-content-search', 'Search teachers...', 'Search teachers')}</div><p class="filter-status" id="admin-search-status" role="status" aria-live="polite" hidden></p>${body}</section>`,
     'Teachers', 'manage-teachers');
   }
 
@@ -1231,7 +1235,7 @@ function managementPage() {
       <span class="admin-record-icon">${icon('home')}</span><div class="admin-content-copy"><b>${escapeHtml(student.name)}</b><small>${escapeHtml(student.email)}</small></div><span class="role-badge">Student</span><small>${Number(student.is_active) === 1 && student.email_verified_at ? 'Active' : 'Inactive or unverified'} · Joined ${escapeHtml(new Date(student.created_at).toLocaleDateString())}</small>
     </article>`).join('') || '<div class="admin-empty"><p>No student accounts yet.</p></div>'}</div>`;
     return shell(`${heading('PEOPLE & ACCESS', 'Students', 'View student accounts registered in StudyNest.', '<button class="button button-outline" data-action="download-report" data-report="students">Download student list CSV ↓</button>')}
-      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Student accounts</b><small>${students.length} ${students.length === 1 ? 'student' : 'students'}</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search students" placeholder="Search students..." /></label></div>${body}</section>`,
+      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Student accounts</b><small>${students.length} ${students.length === 1 ? 'student' : 'students'}</small></div>${searchControl('admin-content-search', 'Search students...', 'Search students')}</div><p class="filter-status" id="admin-search-status" role="status" aria-live="polite" hidden></p>${body}</section>`,
     'Students', 'manage-students');
   }
 
@@ -1241,7 +1245,7 @@ function managementPage() {
       <div class="admin-content-actions">${application.teacher_id_photo_available ? `<button class="quiet-button" data-action="review-teacher" data-id="${application.id}" data-decision="approve">Approve</button>` : ''}<button class="quiet-button danger-text" data-action="review-teacher" data-id="${application.id}" data-decision="reject">Reject</button></div>
     </article>`).join('') || '<div class="admin-empty"><p>You’re all caught up. There are no teacher applications waiting for review.</p></div>'}</div>`;
     return shell(`${heading('PEOPLE & ACCESS', 'Teacher applications', 'Review teacher ID photos and decide who can manage learning content.')}
-      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Applications to review</b><small>${teacherApplications.length} waiting for approval</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search applications" placeholder="Search applications..." /></label></div>${body}</section>`,
+      <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>Applications to review</b><small>${teacherApplications.length} waiting for approval</small></div>${searchControl('admin-content-search', 'Search applications...', 'Search applications')}</div><p class="filter-status" id="admin-search-status" role="status" aria-live="polite" hidden></p>${body}</section>`,
     'Teacher applications', 'manage-applications');
   }
 
@@ -1272,7 +1276,7 @@ function managementPage() {
   }).join('') || `<div class="admin-empty"><p>No ${kind} yet. Add your first ${singular} to start building the student catalog.</p><button class="button button-outline button-small" data-action="new-content" data-kind="${kind}">＋ Create ${singular}</button></div>`;
   const headingAction = `<div class="page-heading-actions"><button class="button button-outline" data-action="download-report" data-report="catalog" data-kind="${kind}">Download CSV ↓</button><button class="button button-primary" data-action="new-content" data-kind="${kind}">＋ Add ${singular}</button></div>`;
   return shell(`${heading('LEARNING CATALOG', title, description, headingAction)}
-    <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>All ${kind}</b><small>${entries.length} ${entries.length === 1 ? singular : kind} in your catalog</small></div><label class="search-field"><span>⌕</span><input id="admin-content-search" type="search" aria-label="Search ${kind}" placeholder="Search ${kind}..." /></label></div><div class="admin-record-list">${rows}</div></section>`,
+    <section class="panel admin-section-panel"><div class="admin-list-toolbar"><div><b>All ${kind}</b><small>${entries.length} ${entries.length === 1 ? singular : kind} in your catalog</small></div>${searchControl('admin-content-search', `Search ${kind}...`, `Search ${kind}`)}</div><p class="filter-status" id="admin-search-status" role="status" aria-live="polite" hidden></p><div class="admin-record-list">${rows}</div></section>`,
   title, `manage-${section}`);
 }
 
@@ -1799,15 +1803,12 @@ app.addEventListener('input', (event) => {
     number?.classList.toggle('answered', event.target.value.trim() !== '');
   }
   if (event.target.id === 'admin-content-search') {
-    const query = event.target.value.trim().toLowerCase();
-    document.querySelectorAll('.admin-record-row').forEach((item) => {
-      item.hidden = !item.dataset.adminSearch.includes(query);
-    });
+    filterAdminRecords(event.target.value);
   }
 });
 app.addEventListener('change', (event) => {
   if (['lesson-subject', 'set-subject', 'set-sort', 'quiz-subject'].includes(event.target.id)) filterCards();
-  if (event.target.id === 'set-subject') updateStudySetTopics(event.target.value);
+  if (event.target.matches('#set-form [name="subject"]')) updateStudySetTopics(event.target.value);
   if (event.target.id === 'set-topic') {
     const subjectField = document.querySelector('#set-subject-field');
     const subjectSelect = document.querySelector('#set-form [name="subject"]');
@@ -1854,29 +1855,91 @@ app.addEventListener('change', (event) => {
   }
 });
 
+app.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || !(event.target instanceof HTMLInputElement) || event.target.type !== 'search') return;
+  event.preventDefault();
+  applySearch(event.target);
+});
+
+function applySearch(input) {
+  if (input.id === 'admin-content-search') filterAdminRecords(input.value);
+  else filterCards();
+}
+
+function filterAdminRecords(value) {
+  const query = value.trim().toLocaleLowerCase();
+  const records = [...document.querySelectorAll('.admin-record-row')];
+  let visibleCount = 0;
+  records.forEach((item) => {
+    item.hidden = !(item.dataset.adminSearch || '').includes(query);
+    if (!item.hidden) visibleCount += 1;
+  });
+  const status = document.querySelector('#admin-search-status');
+  if (!status) return;
+  status.hidden = !query;
+  status.textContent = !query
+    ? ''
+    : visibleCount
+      ? `Showing ${visibleCount} of ${records.length} records.`
+      : 'No results found. Try a different search.';
+}
+
+function updateFilterStatus(statusId, itemSelector, noun, hasFilter) {
+  const status = document.getElementById(statusId);
+  if (!status) return;
+  if (!hasFilter) {
+    status.hidden = true;
+    status.textContent = '';
+    return;
+  }
+  const items = [...document.querySelectorAll(itemSelector)];
+  const visibleCount = items.filter((item) => !item.hidden).length;
+  status.hidden = false;
+  status.textContent = visibleCount
+    ? `${visibleCount} ${noun}${visibleCount === 1 ? '' : 's'} found.`
+    : `No ${noun}s match. Try changing or clearing your filters.`;
+}
+
 function filterCards() {
-  const lessonSearch = document.querySelector('#lesson-search')?.value.toLowerCase() || '';
-  const lessonSubject = document.querySelector('#lesson-subject')?.value || '';
+  const lessonSearch = document.querySelector('#lesson-search')?.value.trim().toLocaleLowerCase() || '';
+  const lessonSubject = document.querySelector('#lesson-subject')?.value.toLocaleLowerCase() || '';
   document.querySelectorAll('.lesson-card').forEach((card) => {
-    card.hidden = !(card.dataset.title.includes(lessonSearch) && (!lessonSubject || card.dataset.subject === lessonSubject));
+    const title = card.dataset.title || '';
+    const subject = (card.dataset.subject || '').toLocaleLowerCase();
+    card.hidden = !(title.includes(lessonSearch) && (!lessonSubject || subject === lessonSubject));
   });
   document.querySelectorAll('[data-topic-group]').forEach((group) => {
     group.hidden = !group.querySelector('.lesson-card:not([hidden])');
   });
-  const setSearch = document.querySelector('#set-search')?.value.toLowerCase() || '';
-  const setSubject = document.querySelector('#set-subject')?.value || '';
+  updateFilterStatus('lesson-filter-status', '.lesson-card', 'lesson', Boolean(lessonSearch || lessonSubject));
+  const setSearch = document.querySelector('#set-search')?.value.trim().toLocaleLowerCase() || '';
+  const setSubject = document.querySelector('#set-subject')?.value.toLocaleLowerCase() || '';
   const sets = [...document.querySelectorAll('.set-card')];
-  sets.forEach((card) => { card.hidden = !(card.dataset.title.includes(setSearch) && (!setSubject || card.dataset.subject === setSubject)); });
-  const sort = document.querySelector('#set-sort')?.value;
-  if (sort) {
-    const parent = document.querySelector('#studyset-grid');
-    sets.sort((a, b) => sort === 'az' ? a.dataset.title.localeCompare(b.dataset.title) : sort === 'cards' ? Number(b.dataset.cards) - Number(a.dataset.cards) : 0).forEach((card) => parent.append(card));
-  }
-  const quizSearch = document.querySelector('#quiz-search')?.value.toLowerCase() || '';
-  const quizSubject = document.querySelector('#quiz-subject')?.value || '';
-  document.querySelectorAll('.quiz-card').forEach((card) => {
-    card.hidden = !(card.dataset.title.includes(quizSearch) && (!quizSubject || card.dataset.subject === quizSubject));
+  sets.forEach((card) => {
+    const title = card.dataset.title || '';
+    const subject = (card.dataset.subject || '').toLocaleLowerCase();
+    card.hidden = !(title.includes(setSearch) && (!setSubject || subject === setSubject));
   });
+  const sort = document.querySelector('#set-sort')?.value;
+  const parent = document.querySelector('#studyset-grid');
+  if (sort && parent) {
+    const originalOrder = (card) => Number(card.dataset.originalOrder) || 0;
+    sets.sort((a, b) => {
+      if (sort === 'az') return (a.dataset.title || '').localeCompare(b.dataset.title || '') || originalOrder(a) - originalOrder(b);
+      if (sort === 'cards') return Number(b.dataset.cards) - Number(a.dataset.cards) || originalOrder(a) - originalOrder(b);
+      return (Date.parse(b.dataset.createdAt || '') || 0) - (Date.parse(a.dataset.createdAt || '') || 0)
+        || originalOrder(a) - originalOrder(b);
+    }).forEach((card) => parent.append(card));
+  }
+  updateFilterStatus('set-filter-status', '.set-card', 'study set', Boolean(setSearch || setSubject));
+  const quizSearch = document.querySelector('#quiz-search')?.value.trim().toLocaleLowerCase() || '';
+  const quizSubject = document.querySelector('#quiz-subject')?.value.toLocaleLowerCase() || '';
+  document.querySelectorAll('.quiz-card').forEach((card) => {
+    const title = card.dataset.title || '';
+    const subject = (card.dataset.subject || '').toLocaleLowerCase();
+    card.hidden = !(title.includes(quizSearch) && (!quizSubject || subject === quizSubject));
+  });
+  updateFilterStatus('quiz-filter-status', '.quiz-card', 'quiz', Boolean(quizSearch || quizSubject));
 }
 
 function updateStudySetTopics(subjectName, dispatchTopicChange = true) {
@@ -1898,6 +1961,16 @@ app.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const { action, id } = button.dataset;
+  if (action === 'apply-search') {
+    const input = document.getElementById(button.dataset.searchTarget);
+    if (!input) {
+      console.error(`Search input not found: ${button.dataset.searchTarget}`);
+      notify('Search could not be applied. Please refresh and try again.');
+      return;
+    }
+    applySearch(input);
+    return;
+  }
   const finishLoading = beginLoading();
   try {
   if (action === 'share-qr') {
